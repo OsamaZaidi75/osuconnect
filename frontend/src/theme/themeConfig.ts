@@ -259,6 +259,11 @@ export function generateTheme(
   const isBalanced = intensityLevel >= 1;
   const isVibrant = intensityLevel >= 2;
 
+  // Frosted-glass surfaces over an accent mesh gradient (dark + balanced/vibrant).
+  const isGlass = isDark && isBalanced;
+  const glassBlur = 'blur(18px) saturate(160%)';
+  const glassBorder = '1px solid rgba(255, 255, 255, 0.10)';
+
   // Semantic colors that adapt to light/dark mode
   // Simplified to just status indicators and overlay levels
   const semanticColors = {
@@ -388,6 +393,13 @@ export function generateTheme(
             }),
             ...(isBalanced && !isVibrant && {
               boxShadow: `0 0 0 1px ${alpha(accent.primary, 0.05)} inset`,
+            }),
+            ...(isGlass && {
+              backgroundColor: 'rgba(26, 29, 36, 0.55)',
+              backdropFilter: glassBlur,
+              WebkitBackdropFilter: glassBlur,
+              border: glassBorder,
+              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08)',
             }),
           },
         },
@@ -534,6 +546,13 @@ export function generateTheme(
                 ? `linear-gradient(180deg, ${blendColors(accent.dark, base.background.paper, 0.3)} 0%, ${base.background.paper} 100%)`
                 : `linear-gradient(180deg, ${blendColors(accent.primary, base.background.paper, 0.2)} 0%, ${base.background.paper} 100%)`,
             }),
+            ...(isGlass && {
+              background: 'rgba(20, 22, 30, 0.55)',
+              backdropFilter: glassBlur,
+              WebkitBackdropFilter: glassBlur,
+              borderRight: glassBorder,
+              boxShadow: 'none',
+            }),
           },
         },
       },
@@ -561,6 +580,13 @@ export function generateTheme(
               background: isDark
                 ? `linear-gradient(90deg, #151820 0%, ${blendColors(accent.dark, '#151820', 0.35)} 100%)`
                 : `linear-gradient(90deg, #ffffff 0%, ${blendColors(accent.primary, '#ffffff', 0.2)} 100%)`,
+            }),
+            ...(isGlass && {
+              background: 'rgba(20, 22, 30, 0.45)',
+              backdropFilter: glassBlur,
+              WebkitBackdropFilter: glassBlur,
+              borderBottom: glassBorder,
+              boxShadow: 'none',
             }),
           },
         },
@@ -737,6 +763,16 @@ export function generateTheme(
               background: isDark
                 ? `linear-gradient(180deg, ${blendColors(accent.dark, base.background.default, 0.15)} 0%, ${base.background.default} 400px)`
                 : `linear-gradient(180deg, ${blendColors(accent.primary, base.background.default, 0.1)} 0%, ${base.background.default} 400px)`,
+              backgroundAttachment: 'fixed',
+            }),
+            ...(isGlass && {
+              background: [
+                `radial-gradient(900px circle at 10% 5%, ${alpha(accent.primary, 0.38)}, transparent 60%)`,
+                `radial-gradient(800px circle at 90% 10%, ${alpha('#8b5cf6', 0.30)}, transparent 55%)`,
+                `radial-gradient(900px circle at 75% 100%, ${alpha('#06b6d4', 0.22)}, transparent 60%)`,
+                `radial-gradient(700px circle at 5% 95%, ${alpha('#ec4899', 0.16)}, transparent 60%)`,
+                '#0b0d14',
+              ].join(', '),
               backgroundAttachment: 'fixed',
             }),
           },

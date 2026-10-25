@@ -53,6 +53,6 @@ export const STORAGE_KEY = 'semaphore-theme';
 
 export const defaultSettings: ThemeSettings = {
   mode: 'dark',
-  accentColor: 'teal',
-  intensity: 'minimal',
+  accentColor: 'indigo',
+  intensity: 'balanced',
 };
