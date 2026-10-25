@@ -1,56 +1,573 @@
+[![License: AGPL v3 + Commercial](https://img.shields.io/badge/license-AGPL%20v3%20%2F%20Commercial-blue)](LICENSE.md)
+[![Backend Coverage](https://raw.githubusercontent.com/semaphore-chat/semaphore-chat/badges/backend-coverage.svg)](https://github.com/semaphore-chat/semaphore-chat/actions/workflows/backend-tests.yml)
+[![Frontend Coverage](https://raw.githubusercontent.com/semaphore-chat/semaphore-chat/badges/frontend-coverage.svg)](https://github.com/semaphore-chat/semaphore-chat/actions/workflows/frontend-tests.yml)
+[![Docs](https://img.shields.io/badge/docs-docs.semaphorechat.app-blue)](https://docs.semaphorechat.app)
+
 # OsuConnect
 
-**Your space. Your people. Your connection.**
+*Your space. Your people. Your connection.*
 
-OsuConnect is a private, self-hosted Discord-style platform: text channels, voice and video, and screen sharing with audio. It runs in any browser (including phones, with no install) or in a Windows desktop app that can share system audio.
+OsuConnect is a self-hosted, free, open-source communication platform that provides real-time messaging, voice and video calls, screen sharing with audio and replay capture, and community management out of the box. Run it in your browser or as an Electron desktop app on Windows and Linux, as well as on your phone as a PWA with push notification support.
 
-Live instance: https://129-80-41-146.nip.io
+> **Beta Software** — OsuConnect is under active development. Expect bugs and occasional breaking changes. If you find a bug please report it as an issue!
+
+<p align="center">
+  <a href="https://docs.semaphorechat.app/tour/">
+    <picture>
+      <source srcset="https://raw.githubusercontent.com/semaphore-chat/semaphore-chat/media/video/hero.webp" type="image/webp">
+      <img src="https://raw.githubusercontent.com/semaphore-chat/semaphore-chat/media/video/hero.gif" width="960" alt="OsuConnect in action: a message is typed and sent in a community channel, a reaction is added, a thread opens, and then a voice channel shows people talking.">
+    </picture>
+  </a>
+  <br>
+  <sub><a href="https://docs.semaphorechat.app/tour/">Take the full tour →</a></sub>
+</p>
+
+<table>
+  <tr>
+    <td width="33%" align="center" valign="top">
+      <a href="https://raw.githubusercontent.com/semaphore-chat/semaphore-chat/media/screenshots/chat-desktop.webp"><img src="https://raw.githubusercontent.com/semaphore-chat/semaphore-chat/media/screenshots/chat-desktop.webp" alt="A community channel on desktop with a game screenshot, emoji reactions, an animated GIF and the member list."></a>
+      <br><sub>Channels with images, GIFs and reactions</sub>
+    </td>
+    <td width="33%" align="center" valign="top">
+      <a href="https://raw.githubusercontent.com/semaphore-chat/semaphore-chat/media/screenshots/thread-desktop.webp"><img src="https://raw.githubusercontent.com/semaphore-chat/semaphore-chat/media/screenshots/thread-desktop.webp" alt="A thread with five replies open beside the channel."></a>
+      <br><sub>Threads for side conversations</sub>
+    </td>
+    <td width="33%" align="center" valign="top">
+      <a href="https://raw.githubusercontent.com/semaphore-chat/semaphore-chat/media/screenshots/voice-desktop.webp"><img src="https://raw.githubusercontent.com/semaphore-chat/semaphore-chat/media/screenshots/voice-desktop.webp" alt="A voice channel with three participants, two of them highlighted as speaking, and the voice controls bar."></a>
+      <br><sub>Drop-in voice with speaking indicators</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="33%" align="center" valign="top">
+      <a href="https://raw.githubusercontent.com/semaphore-chat/semaphore-chat/media/screenshots/dms-desktop.webp"><img src="https://raw.githubusercontent.com/semaphore-chat/semaphore-chat/media/screenshots/dms-desktop.webp" alt="A direct message with the conversation list showing unread badges."></a>
+      <br><sub>Direct messages and group DMs</sub>
+    </td>
+    <td width="33%" align="center" valign="top">
+      <a href="https://raw.githubusercontent.com/semaphore-chat/semaphore-chat/media/screenshots/community-roles-desktop.webp"><img src="https://raw.githubusercontent.com/semaphore-chat/semaphore-chat/media/screenshots/community-roles-desktop.webp" alt="Community settings showing custom roles and their permissions."></a>
+      <br><sub>Communities with roles and permissions</sub>
+    </td>
+    <td width="33%" align="center" valign="top">
+      <a href="https://raw.githubusercontent.com/semaphore-chat/semaphore-chat/media/screenshots/chat-light-desktop.webp"><img src="https://raw.githubusercontent.com/semaphore-chat/semaphore-chat/media/screenshots/chat-light-desktop.webp" alt="A product team's channel in the light theme, with a link preview and a code block."></a>
+      <br><sub>Light and dark themes, twelve accents</sub>
+    </td>
+  </tr>
+</table>
 
 ## Features
 
-- Communities with text and voice channels, threads, reactions, DMs and file sharing
-- Voice, video and screen sharing with audio, powered by a LiveKit SFU
-- Browser and phone (PWA) viewing, no install needed
-- Windows desktop app (Electron) with system-audio capture for screen share
-- Invite-only registration, roles and permissions, and an admin panel
-- Frosted-glass dark theme by default, with selectable accent colours and light mode
+- **Messaging** — Real-time text channels with mentions, reactions, threads, file attachments, and read receipts
+- **Voice & Video** — LiveKit-powered calls with screen sharing, including system audio capture on the desktop app
+- **Uncapped Screen Share & Voice** — Screen share at the resolution and frame rate you pick, up to 4K at 60 fps (about 9 Mbps at 1080p60, 25 Mbps at 4K60), with lower layers for viewers on weaker connections; high-bitrate Opus voice (96 kbps by default, up to 128 kbps). No paid tier. See [Voice & Screen Share Quality](https://docs.semaphorechat.app/architecture/voice-video-quality/)
+- **Replay Capture** — Continuously buffers screen share sessions so you can retroactively clip the last 1-10 minutes. Trim to the exact clip, then share to a channel or save to your personal clip library
+- **Desktop App** — Electron client for Windows and Linux with a custom screen source picker, system tray integration, and auto-updates
+- **Communities** — Servers with text and voice channels, private channels, direct messages, and group DMs with file attachments
+- **Administration** — Role-based access control with granular permissions, community bans and timeouts, moderation logs, and per-user storage quotas
+- **Mobile-Friendly** — Responsive UI with swipe navigation, mobile-optimized panels, PWA support for install-to-homescreen, and push notifications
+- **Self-Hosted** — Run on your own infrastructure with Docker Compose or Kubernetes. Your data stays yours and you can choose the data upload limits for your users
 
-> Note: DRM-protected video (Netflix and similar) shows as a black frame when screen-shared. That is a limit of the streaming service, not of OsuConnect.
+## Architecture
 
-## Deploy
-
-The production stack for an Oracle Cloud Always Free ARM64 VM (Caddy for HTTPS, backend, frontend, LiveKit, Postgres, Redis) lives in [`deploy/oracle`](./deploy/oracle/README.md).
-
-```bash
-git clone https://github.com/OsamaZaidi75/osuconnect.git /opt/osuconnect
-cd /opt/osuconnect/deploy/oracle
-cp env.example .env.prod      # fill in the secrets
-docker compose --env-file .env.prod up -d --build
+```mermaid
+graph LR
+    Client[Browser] --> Proxy[Reverse Proxy<br/>nginx / Caddy]
+    Proxy -->|/| Frontend[Frontend<br/>React + Nginx<br/>:5173]
+    Proxy -->|/api, /socket.io| Backend[Backend<br/>NestJS<br/>:3000]
+    Backend --> PostgreSQL[(PostgreSQL<br/>:5432)]
+    Backend --> Redis[(Redis<br/>:6379)]
+    Backend --> LiveKit[LiveKit Server]
 ```
 
-Update an existing server:
+| Layer | Technology |
+|-------|-----------|
+| Backend | [NestJS](https://nestjs.com/) (TypeScript) |
+| Frontend | [React 19](https://react.dev/) + [Vite](https://vitejs.dev/) + [Material UI](https://mui.com/) |
+| Database | [PostgreSQL](https://www.postgresql.org/) with [Prisma ORM](https://www.prisma.io/) |
+| Real-time | [Socket.IO](https://socket.io/) with Redis adapter |
+| Voice/Video | [LiveKit](https://livekit.io/) |
+| State | [TanStack Query v5](https://tanstack.com/query/latest) |
+| Auth | JWT with [Passport.js](https://www.passportjs.org/) |
+| Desktop | [Electron](https://www.electronjs.org/) |
 
-```bash
-cd /opt/osuconnect && git pull
-cd deploy/oracle && docker compose --env-file .env.prod up -d --build
+## Quickstart
+
+Docker Compose setup. For Kubernetes deployment with Helm, see the [full docs](https://docs.semaphorechat.app/installation/kubernetes/).
+
+### 1. Pick your setup
+
+<details open>
+<summary><strong>With Caddy</strong> — automatic HTTPS</summary>
+
+#### docker-compose.yml
+
+```yaml
+services:
+  caddy:
+    image: caddy:latest
+    restart: unless-stopped
+    ports:
+      - "443:443"
+      - "80:80"
+    environment:
+      HOST: ${HOST:?Set HOST in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+      - backend
+      - livekit
+
+  backend:
+    image: ghcr.io/semaphore-chat/semaphore-chat-backend:latest
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://semaphore:semaphore@postgres:5432/semaphore
+      REDIS_HOST: redis
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET in .env}
+      LIVEKIT_URL: wss://lk.${HOST:?Set HOST in .env}
+      LIVEKIT_INTERNAL_URL: http://livekit:7880
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY in .env}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET in .env}
+      # Caddy is the one proxy hop. The backend publishes no port, so it is only reachable through Caddy.
+      TRUST_PROXY: 1
+      REPLAY_SEGMENTS_PATH: /app/storage/replay-segments
+      REPLAY_EGRESS_OUTPUT_PATH: /out
+      REPLAY_CLIPS_PATH: /app/backend/uploads/replays
+    volumes:
+      - uploads:/app/backend/uploads
+      - egress-data:/app/storage/replay-segments  # shared with livekit-egress
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      livekit:
+        condition: service_started
+
+  frontend:
+    image: ghcr.io/semaphore-chat/semaphore-chat-frontend:latest
+    restart: unless-stopped
+    environment:
+      BACKEND_URL: http://backend:3000
+    depends_on:
+      - backend
+
+  livekit:
+    image: livekit/livekit-server:v1.13.7
+    restart: unless-stopped
+    environment:
+      LIVEKIT_CONFIG: |
+        port: 7880
+        rtc:
+          tcp_port: 7881
+          udp_port: 7882
+          use_external_ip: true
+        redis:
+          address: redis:6379
+        keys:
+          ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
+        webhook:
+          api_key: ${LIVEKIT_API_KEY}
+          urls:
+            - http://backend:3000/api/livekit/webhook
+    ports:
+      - "7881:7881"
+      - "7882:7882/udp"
+
+  volume-init:
+    image: busybox
+    volumes:
+      - uploads:/uploads
+      - egress-data:/out
+    command: sh -c 'chown -R 1001:0 /uploads /out'
+    restart: "no"
+
+  livekit-egress:
+    image: livekit/egress:v1.14.1
+    restart: unless-stopped
+    cap_add:
+      - SYS_ADMIN
+    environment:
+      EGRESS_CONFIG_BODY: |
+        api_key: ${LIVEKIT_API_KEY}
+        api_secret: ${LIVEKIT_API_SECRET}
+        ws_url: ws://livekit:7880
+        redis:
+          address: redis:6379
+    volumes:
+      - egress-data:/out
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+      livekit:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+  livekit-ip-watcher:
+    image: curlimages/curl:latest
+    restart: unless-stopped
+    command: sh /scripts/livekit-ip-watcher.sh
+    environment:
+      CHECK_INTERVAL: 300
+      LIVEKIT_CONTAINER: livekit
+    volumes:
+      - ./scripts/livekit-ip-watcher.sh:/scripts/livekit-ip-watcher.sh:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      livekit:
+        condition: service_started
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: semaphore
+      POSTGRES_PASSWORD: semaphore
+      POSTGRES_DB: semaphore
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U semaphore"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:latest
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+    volumes:
+      - redisdata:/data
+
+volumes:
+  pgdata:
+  redisdata:
+  uploads:
+  egress-data:
+  caddy_data:
+  caddy_config:
 ```
 
-Required ports: 80/TCP, 443/TCP, 7881/TCP and 7882/UDP.
+#### Caddyfile
 
-## Inviting people
+Save this as `Caddyfile` next to your `docker-compose.yml`:
 
-Registration is invite-only. Open `/#/admin/invites`, create an invite, and send the link (`/#/join/<code>`) to your friend. It works in a phone browser.
+```
+{$HOST:?Set HOST in .env} {
+	handle /api/* {
+		reverse_proxy backend:3000
+	}
+	handle /socket.io/* {
+		reverse_proxy backend:3000
+	}
+	handle {
+		reverse_proxy frontend:5173
+	}
+}
+
+lk.{$HOST} {
+	reverse_proxy livekit:7880
+}
+```
+
+#### Download the IP watcher script
+
+```bash
+mkdir -p scripts
+curl -fsSL https://raw.githubusercontent.com/semaphore-chat/semaphore-chat/main/scripts/livekit-ip-watcher.sh -o scripts/livekit-ip-watcher.sh
+```
+
+#### Port forwarding
+
+| Port | Protocol | Service |
+|------|----------|---------|
+| 443 | TCP | HTTPS (frontend, backend, LiveKit signaling) |
+| 80 | TCP | HTTP → HTTPS redirect |
+| 7881 | TCP | LiveKit WebRTC (TCP) |
+| 7882 | UDP | LiveKit WebRTC (UDP) |
+
+</details>
+
+<details>
+<summary><strong>BYO reverse proxy</strong> — use your own (nginx, NPM, Traefik, etc.)</summary>
+
+#### docker-compose.yml
+
+```yaml
+services:
+  backend:
+    image: ghcr.io/semaphore-chat/semaphore-chat-backend:latest
+    restart: unless-stopped
+    ports:
+      # Localhost only: clients must reach the backend through your reverse proxy,
+      # or they can spoof their IP with an X-Forwarded-For header.
+      - "127.0.0.1:3000:3000"
+    environment:
+      DATABASE_URL: postgresql://semaphore:semaphore@postgres:5432/semaphore
+      REDIS_HOST: redis
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET in .env}
+      LIVEKIT_URL: wss://lk.${HOST:?Set HOST in .env}
+      LIVEKIT_INTERNAL_URL: http://livekit:7880
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY in .env}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET in .env}
+      # Must equal the number of proxy hops in front of the backend. See "Reverse proxy routing".
+      TRUST_PROXY: 1
+      REPLAY_SEGMENTS_PATH: /app/storage/replay-segments
+      REPLAY_EGRESS_OUTPUT_PATH: /out
+      REPLAY_CLIPS_PATH: /app/backend/uploads/replays
+    volumes:
+      - uploads:/app/backend/uploads
+      - egress-data:/app/storage/replay-segments  # shared with livekit-egress
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      livekit:
+        condition: service_started
+
+  frontend:
+    image: ghcr.io/semaphore-chat/semaphore-chat-frontend:latest
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      BACKEND_URL: http://backend:3000
+    depends_on:
+      - backend
+
+  livekit:
+    image: livekit/livekit-server:v1.13.7
+    restart: unless-stopped
+    environment:
+      LIVEKIT_CONFIG: |
+        port: 7880
+        rtc:
+          tcp_port: 7881
+          udp_port: 7882
+          use_external_ip: true
+        redis:
+          address: redis:6379
+        keys:
+          ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
+        webhook:
+          api_key: ${LIVEKIT_API_KEY}
+          urls:
+            - http://backend:3000/api/livekit/webhook
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+
+  volume-init:
+    image: busybox
+    volumes:
+      - uploads:/uploads
+      - egress-data:/out
+    command: sh -c 'chown -R 1001:0 /uploads /out'
+    restart: "no"
+
+  livekit-egress:
+    image: livekit/egress:v1.14.1
+    restart: unless-stopped
+    cap_add:
+      - SYS_ADMIN
+    environment:
+      EGRESS_CONFIG_BODY: |
+        api_key: ${LIVEKIT_API_KEY}
+        api_secret: ${LIVEKIT_API_SECRET}
+        ws_url: ws://livekit:7880
+        redis:
+          address: redis:6379
+    volumes:
+      - egress-data:/out
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+      livekit:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+  livekit-ip-watcher:
+    image: curlimages/curl:latest
+    restart: unless-stopped
+    command: sh /scripts/livekit-ip-watcher.sh
+    environment:
+      CHECK_INTERVAL: 300
+      LIVEKIT_CONTAINER: livekit
+    volumes:
+      - ./scripts/livekit-ip-watcher.sh:/scripts/livekit-ip-watcher.sh:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      livekit:
+        condition: service_started
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: semaphore
+      POSTGRES_PASSWORD: semaphore
+      POSTGRES_DB: semaphore
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U semaphore"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:latest
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+    volumes:
+      - redisdata:/data
+
+volumes:
+  pgdata:
+  redisdata:
+  uploads:
+  egress-data:
+```
+
+#### Reverse proxy routing
+
+The frontend's built-in nginx already proxies `/api` and `/socket.io` to the backend internally. Your reverse proxy only needs to route by domain — no path splitting required:
+
+| Domain | Destination | Notes |
+|--------|-------------|-------|
+| `your-domain.com` | `localhost:5173` | Frontend (handles `/api` and `/socket.io` internally) |
+| `lk.your-domain.com` | `localhost:7880` | LiveKit signaling — ensure WebSocket upgrade headers are forwarded |
+
+Routed this way, the frontend's nginx is the backend's one trusted proxy hop (`TRUST_PROXY: 1`), so the backend sees every client as your reverse proxy's address. For real client IPs (per-client rate limiting, session IPs), also route `/api` and `/socket.io` on `your-domain.com` straight to `localhost:3000`, and have your proxy set `X-Forwarded-For`. Keep `TRUST_PROXY` equal to the real number of hops, and never publish port 3000 beyond localhost: a client that reaches the backend directly can spoof its IP.
+
+#### Download the IP watcher script
+
+```bash
+mkdir -p scripts
+curl -fsSL https://raw.githubusercontent.com/semaphore-chat/semaphore-chat/main/scripts/livekit-ip-watcher.sh -o scripts/livekit-ip-watcher.sh
+```
+
+#### Port forwarding
+
+| Port | Protocol | Service |
+|------|----------|---------|
+| 443 | TCP | Your reverse proxy |
+| 7881 | TCP | LiveKit WebRTC (TCP) |
+| 7882 | UDP | LiveKit WebRTC (UDP) |
+
+</details>
+
+### 2. Configure environment
+
+Create a `.env` file next to your `docker-compose.yml`. Your domain needs two DNS records pointing to your server — `HOST` and `lk.HOST` (e.g. `semaphore.example.com` and `lk.semaphore.example.com`), or a wildcard `*.semaphore.example.com`.
+
+```env
+HOST=semaphore.example.com
+JWT_SECRET=replace-with-a-long-random-string
+JWT_REFRESH_SECRET=replace-with-a-different-long-random-string
+LIVEKIT_API_KEY=replace-with-a-key-name
+LIVEKIT_API_SECRET=replace-with-a-secret-at-least-32-characters
+```
+
+Generate secrets with:
+
+```bash
+openssl rand -base64 32
+```
+
+### 3. Start
+
+```bash
+docker compose up -d
+```
+
+### 4. Open OsuConnect
+
+Visit `https://<your-domain>` and create your first account.
+
+For more details, see the [full installation guide](https://docs.semaphorechat.app/installation/docker-compose/).
 
 ## Development
 
-Backend: NestJS, Prisma and PostgreSQL. Frontend: React and MUI. Both are in this repo (`backend/`, `frontend/`).
+For contributors working on OsuConnect itself — clone the repo and use the dev Compose file which mounts source code with hot reload:
 
 ```bash
-docker compose up -d          # dev stack with hot reload
+git clone https://github.com/semaphore-chat/semaphore-chat.git
+cd semaphore-chat
+docker compose up
 ```
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) and [SECURITY.md](./SECURITY.md).
+All development happens inside Docker containers — never run pnpm/npm/node directly on the host.
 
-## Credits and license
+```bash
+# Run backend tests
+docker compose run --rm backend pnpm run test
 
-OsuConnect is built on the open-source [Semaphore Chat](https://github.com/semaphore-chat/semaphore-chat) project and keeps its license: **AGPL v3** (see [LICENSE.md](./LICENSE.md)). Under the AGPL, anyone who uses a modified OsuConnect over a network is entitled to its source, which is this repository. The original project README is kept in [`docs/UPSTREAM_README.md`](./docs/UPSTREAM_README.md).
+# Run frontend tests
+docker compose run --rm frontend pnpm run test
+
+# Lint
+docker compose run --rm backend pnpm run lint
+
+# Push database schema
+docker compose run --rm backend pnpm run prisma
+```
+
+These commands drive the dev stack in your clone. Working in a git worktree, or on several branches at once? Use `scripts/test-stack.sh <ticket> run-backend|run-frontend <cmd>` instead: it runs everything on one shared Docker network rather than creating a compose project (and a network) per checkout. See [Test Stacks](https://docs.semaphorechat.app/contributing/testing/#test-stacks-and-the-shared-docker-network).
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) and the [developer docs](https://docs.semaphorechat.app) for more.
+
+## Deployment
+
+- **Docker Compose** — The [installation guide](https://docs.semaphorechat.app/installation/docker-compose/) covers everything from first launch to production with reverse proxy, TLS, and backups.
+
+- **Kubernetes** — Deploy with the official Helm chart:
+  ```bash
+  helm install semaphore-chat oci://ghcr.io/semaphore-chat/semaphore-chat/charts/semaphore-chat
+  ```
+  See the [Helm chart README](./helm/semaphore-chat/README.md) and [Kubernetes guide](https://docs.semaphorechat.app/installation/kubernetes/).
+
+- **Desktop app** — Electron builds for Windows and Linux are available from the [desktop app page](https://docs.semaphorechat.app/installation/desktop-app/).
+
+- **Docker images** — `ghcr.io/semaphore-chat/semaphore-chat-backend` and `ghcr.io/semaphore-chat/semaphore-chat-frontend`
+
+## Documentation
+
+- Full docs: [docs.semaphorechat.app](https://docs.semaphorechat.app)
+- API docs: Swagger UI at `/api` when running locally
+
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines on bug reports, feature requests, and code contributions.
+
+## Security
+
+To report a vulnerability, see [SECURITY.md](./SECURITY.md).
+
+## License
+
+OsuConnect is built on the open-source [Semaphore Chat](https://github.com/semaphore-chat/semaphore-chat) project and keeps its licensing. It is **dual-licensed** upstream:
+
+- **AGPLv3** (default) — free for everyone, including commercial use, as long as you comply with AGPL terms (see [LICENSE](./LICENSE.md)).
+- **Commercial License** — available for those who want to keep modifications proprietary or avoid AGPL source-sharing obligations (see [LICENSE_COM](./LICENSE_COM.md) and [LICENSE-FAQ.md](./LICENSE-FAQ.md)).
+
+Contact us for commercial licensing — licensing {at} semaphorechat [dot] app
