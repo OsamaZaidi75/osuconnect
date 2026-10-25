@@ -40,6 +40,8 @@ services:
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD required}
       FILE_UPLOAD_DEST: /app/uploads
+      FILE_RETENTION_DAYS: ${FILE_RETENTION_DAYS:-30}
+      FILE_RETENTION_MIN_SIZE_MB: ${FILE_RETENTION_MIN_SIZE_MB:-25}
       LIVEKIT_URL: wss://${PUBLIC_DOMAIN}/livekit
       LIVEKIT_INTERNAL_URL: http://livekit:7880
     volumes:
