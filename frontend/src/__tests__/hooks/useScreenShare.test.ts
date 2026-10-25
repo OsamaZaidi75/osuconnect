@@ -40,9 +40,11 @@ vi.mock('../../utils/platform', () => ({
 }));
 
 const mockSetScreenShareConfig = vi.fn();
+const mockSetScreenShareSettings = vi.fn();
 const mockClearScreenShareConfig = vi.fn();
 vi.mock('../../utils/screenShareState', () => ({
   setScreenShareConfig: (...args: unknown[]) => mockSetScreenShareConfig(...args),
+  setScreenShareSettings: (...args: unknown[]) => mockSetScreenShareSettings(...args),
   clearScreenShareConfig: () => mockClearScreenShareConfig(),
 }));
 
@@ -78,13 +80,22 @@ describe('useScreenShare', () => {
     });
   }
 
-  it('web: toggleScreenShare calls actions.toggleScreenShare directly', async () => {
+  it('web: toggleScreenShare opens the quality dialog; confirming starts the share', async () => {
     const { result } = renderUseScreenShare();
 
     await act(async () => {
       await result.current.toggleScreenShare();
     });
 
+    expect(result.current.showWebSettings).toBe(true);
+    expect(mockToggleScreenShare).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.handleWebSettingsStart({ resolution: '720p', fps: 30, enableAudio: true });
+    });
+
+    expect(result.current.showWebSettings).toBe(false);
+    expect(mockSetScreenShareSettings).toHaveBeenCalledWith({ resolution: '720p', fps: 30, enableAudio: true });
     expect(mockToggleScreenShare).toHaveBeenCalled();
     expect(result.current.showSourcePicker).toBe(false);
   });
@@ -131,12 +142,14 @@ describe('useScreenShare', () => {
     expect(result.current.isScreenSharing).toBe(false);
   });
 
-  it('web / Wayland: a cancelled or refused native picker does not reject', async () => {
+  it('web: a cancelled or refused native picker does not reject', async () => {
     mockToggleScreenShare.mockRejectedValueOnce(new DOMException('Permission denied', 'NotAllowedError'));
     const { result } = renderUseScreenShare();
 
     await act(async () => {
-      await expect(result.current.toggleScreenShare()).resolves.toBeUndefined();
+      await expect(
+        result.current.handleWebSettingsStart({ resolution: '1080p', fps: 60, enableAudio: true }),
+      ).resolves.toBeUndefined();
     });
 
     expect(mockToggleScreenShare).toHaveBeenCalled();

@@ -53,6 +53,7 @@ import { useVoicePublishPermissions } from "../../hooks/useVoicePublishPermissio
 import { DeviceSettingsDialog } from "./DeviceSettingsDialog";
 import { SoundboardButton } from "./SoundboardButton";
 import { ScreenSourcePicker } from "./ScreenSourcePicker";
+import { ScreenShareSettingsDialog } from "./ScreenShareSettingsDialog";
 import { CaptureReplayModal } from "./CaptureReplayModal";
 import { useResponsive } from "../../hooks/useResponsive";
 import { useHapticFeedback } from "../../hooks/useHapticFeedback";
@@ -781,6 +782,13 @@ const VoiceBottomBarContent: React.FC = () => {
           open={screenShare.showSourcePicker}
           onClose={screenShare.handleSourcePickerClose}
           onSelect={screenShare.handleSourceSelect}
+        />
+
+        {/* Web screen share quality dialog */}
+        <ScreenShareSettingsDialog
+          open={Boolean(screenShare.showWebSettings)}
+          onClose={screenShare.handleWebSettingsClose}
+          onStart={screenShare.handleWebSettingsStart}
         />
 
         {/* Phone "more" sheet: the secondary call actions that don't fit in

@@ -24,6 +24,7 @@ import UserAvatar from '../Common/UserAvatar';
 import ScreenShareVolumeControl from './ScreenShareVolumeControl';
 import { useSpeaking } from '../../hooks/useSpeaking';
 import { useResponsive } from '../../hooks/useResponsive';
+import { useVideoStreamStats } from '../../hooks/useVideoStreamStats';
 import { setScreenShareFocused } from '../../utils/screenShareViewQuality';
 import { voiceTileColor } from '../../utils/voiceTileColor';
 import { voiceStatusBadges } from './components/voiceUserState';
@@ -159,6 +160,7 @@ const VideoTile: React.FC<VideoTileProps> = ({
 
   const hasVideo = videoTrack && !videoTrack.isMuted;
   const hasScreen = screenTrack && !screenTrack.isMuted;
+  const streamStats = useVideoStreamStats(screenRef, Boolean(hasScreen) && !isPlaceholder);
   const hasAudio = audioTrack && !audioTrack.isMuted;
   const displayName = participant.name || participant.identity;
   const isSharing = hasScreen;
@@ -409,12 +411,43 @@ const VideoTile: React.FC<VideoTileProps> = ({
         </Box>
       </Fade>
 
+      {/* Live quality badge: measured resolution and frame rate of the share */}
+      {hasScreen && streamStats && (
+        <Box
+          data-testid="screen-share-stats"
+          sx={{
+            position: 'absolute',
+            top: 8,
+            left: 8,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 0.75,
+            px: 1,
+            py: 0.25,
+            borderRadius: 1,
+            backgroundColor: alpha(theme.palette.common.black, 0.6),
+            backdropFilter: 'blur(6px)',
+            pointerEvents: 'none',
+          }}
+        >
+          <Typography
+            variant="caption"
+            sx={{ color: 'white', fontWeight: 700, fontSize: 'scale.xs', letterSpacing: 0.4 }}
+          >
+            LIVE
+          </Typography>
+          <Typography variant="caption" sx={{ color: 'grey.200', fontSize: 'scale.xs' }}>
+            {streamStats.height}p {streamStats.fps} fps
+          </Typography>
+        </Box>
+      )}
+
       {/* Recording indicator - top left (only for local screen share) */}
       {isLocal && isSharing && isReplayBufferActive && (
         <Box
           sx={{
             position: 'absolute',
-            top: 12,
+            top: hasScreen && streamStats ? 40 : 12,
             left: 12,
             display: 'flex',
             alignItems: 'center',

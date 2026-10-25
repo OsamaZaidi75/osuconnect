@@ -11,9 +11,10 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useVoiceConnection } from './useVoiceConnection';
 import { useLocalMediaState } from './useLocalMediaState';
-import { hasElectronFeature, isWayland } from '../utils/platform';
+import { hasElectronFeature, isElectron, isWayland } from '../utils/platform';
 import { ScreenShareSettings } from '../components/Voice/ScreenSourcePicker';
-import { setScreenShareConfig, clearScreenShareConfig } from '../utils/screenShareState';
+import { setScreenShareConfig, setScreenShareSettings, clearScreenShareConfig } from '../utils/screenShareState';
+import type { ScreenShareSettings as WebScreenShareSettings } from '../utils/screenShareState';
 import { useNotification } from '../contexts/NotificationContext';
 import { useVoice } from '../contexts/VoiceContext';
 import { playSound, Sounds } from './useSound';
@@ -22,11 +23,14 @@ import { logger } from '../utils/logger';
 interface UseScreenShareReturn {
   isScreenSharing: boolean;
   showSourcePicker: boolean;
+  showWebSettings: boolean;
   startScreenShare: () => Promise<void>;
   stopScreenShare: () => Promise<void>;
   toggleScreenShare: () => Promise<void>;
   handleSourceSelect: (sourceId: string, settings: ScreenShareSettings) => Promise<void>;
   handleSourcePickerClose: () => void;
+  handleWebSettingsStart: (settings: WebScreenShareSettings) => Promise<void>;
+  handleWebSettingsClose: () => void;
 }
 
 /**
@@ -36,6 +40,7 @@ export const useScreenShare = (): UseScreenShareReturn => {
   const { actions } = useVoiceConnection();
   const { isScreenShareEnabled } = useLocalMediaState();
   const [showSourcePicker, setShowSourcePicker] = useState(false);
+  const [showWebSettings, setShowWebSettings] = useState(false);
   const { showNotification } = useNotification();
 
   // Track if audio capture failed (USB headset in exclusive mode, etc.)
@@ -63,9 +68,12 @@ export const useScreenShare = (): UseScreenShareReturn => {
     if (hasElectronFeature('getDesktopSources') && !isWayland()) {
       // Electron on X11/macOS/Windows: Show custom source picker
       setShowSourcePicker(true);
+    } else if (!isElectron()) {
+      // Web: choose quality first; the browser's own picker opens on confirm.
+      setShowWebSettings(true);
     } else {
-      // Web or Electron on Wayland: Let browser/OS handle source selection.
-      // On Wayland, the main process handler triggers the PipeWire portal.
+      // Electron on Wayland: let the OS portal handle source selection.
+      // The main process handler triggers the PipeWire portal.
       try {
         await actions.toggleScreenShare();
       } catch (error) {
@@ -129,6 +137,27 @@ export const useScreenShare = (): UseScreenShareReturn => {
   }, []);
 
   /**
+   * Web: quality chosen, open the browser's picker and publish
+   */
+  const handleWebSettingsStart = useCallback(
+    async (settings: WebScreenShareSettings) => {
+      setShowWebSettings(false);
+      setScreenShareSettings(settings);
+      try {
+        await actions.toggleScreenShare();
+      } catch (error) {
+        clearScreenShareConfig();
+        logger.warn('[ScreenShare] screen share not started:', error);
+      }
+    },
+    [actions]
+  );
+
+  const handleWebSettingsClose = useCallback(() => {
+    setShowWebSettings(false);
+  }, []);
+
+  /**
    * Clean up screen share config when screen sharing stops
    */
   useEffect(() => {
@@ -154,10 +183,13 @@ export const useScreenShare = (): UseScreenShareReturn => {
   return {
     isScreenSharing: isScreenShareEnabled,
     showSourcePicker,
+    showWebSettings,
     startScreenShare,
     stopScreenShare,
     toggleScreenShare,
     handleSourceSelect,
     handleSourcePickerClose,
+    handleWebSettingsStart,
+    handleWebSettingsClose,
   };
 };
