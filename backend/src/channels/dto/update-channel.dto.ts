@@ -28,4 +28,16 @@ export class UpdateChannelDto {
   @IsInt()
   @Min(0)
   position?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(3650)
+  messageRetentionDays?: number | null;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(3650)
+  fileRetentionDays?: number | null;
 }

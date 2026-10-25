@@ -29,12 +29,17 @@ interface CreateChannelFormData {
   name: string;
   type: "TEXT" | "VOICE";
   isPrivate: boolean;
+  disappearing: boolean;
 }
+
+const DISAPPEARING_MESSAGE_DAYS = 30;
+const DISAPPEARING_FILE_DAYS = 15;
 
 const initialFormData: CreateChannelFormData = {
   name: "",
   type: "TEXT",
   isPrivate: false,
+  disappearing: false,
 };
 
 const CreateChannelDialog: React.FC<CreateChannelDialogProps> = ({
@@ -65,6 +70,12 @@ const CreateChannelDialog: React.FC<CreateChannelDialogProps> = ({
           type: formData.type,
           communityId,
           isPrivate: formData.isPrivate,
+          ...(formData.type === "TEXT" && formData.disappearing
+            ? {
+                messageRetentionDays: DISAPPEARING_MESSAGE_DAYS,
+                fileRetentionDays: DISAPPEARING_FILE_DAYS,
+              }
+            : {}),
         },
       });
 
@@ -112,6 +123,23 @@ const CreateChannelDialog: React.FC<CreateChannelDialogProps> = ({
         <Typography variant="caption" color="text.secondary" display="block" mt={1}>
           Private channels require explicit membership management
         </Typography>
+        {formData.type === "TEXT" && (
+          <>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={formData.disappearing}
+                  onChange={(e) => setFormData({ ...formData, disappearing: e.target.checked })}
+                />
+              }
+              label="Disappearing Channel"
+            />
+            <Typography variant="caption" color="text.secondary" display="block" mt={1}>
+              Messages are deleted after {DISAPPEARING_MESSAGE_DAYS} days and shared files are wiped after{" "}
+              {DISAPPEARING_FILE_DAYS} days. This cannot be undone.
+            </Typography>
+          </>
+        )}
       </DialogContent>
       <DialogActions>
         <Button onClick={handleClose}>Cancel</Button>

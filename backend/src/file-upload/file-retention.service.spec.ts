@@ -6,11 +6,18 @@ describe('FileRetentionService', () => {
   const findMany = jest.fn();
   const updateMany = jest.fn();
   const decrementUserStorage = jest.fn();
+  const channelFindMany = jest.fn();
+  const messageFindMany = jest.fn();
+  const messageDeleteMany = jest.fn();
   const env: Record<string, string | undefined> = {};
 
   const build = () =>
     new FileRetentionService(
-      { file: { findMany, updateMany } } as never,
+      {
+        file: { findMany, updateMany },
+        channel: { findMany: channelFindMany },
+        message: { findMany: messageFindMany, deleteMany: messageDeleteMany },
+      } as never,
       { decrementUserStorage } as never,
       { get: (key: string) => env[key] } as unknown as ConfigService,
     );
@@ -50,6 +57,37 @@ describe('FileRetentionService', () => {
 
     expect(await build().purgeExpiredLargeAttachments()).toBe(0);
     expect(findMany).not.toHaveBeenCalled();
+  });
+
+  it('applies per-channel file and message retention', async () => {
+    channelFindMany.mockResolvedValueOnce([
+      { id: 'c1', fileRetentionDays: 15, messageRetentionDays: 30 },
+    ]);
+    findMany.mockResolvedValueOnce([
+      { id: 'f1', size: 1000, uploadedById: 'u1' },
+    ]);
+    updateMany.mockResolvedValue({ count: 1 });
+    messageFindMany
+      .mockResolvedValueOnce([{ id: 'm1' }, { id: 'm2' }])
+      .mockResolvedValueOnce([]);
+    messageDeleteMany.mockResolvedValue({ count: 2 });
+
+    const result = await build().purgeDisappearingChannels();
+
+    expect(result).toEqual({ files: 1, messages: 2 });
+    const fileWhere = findMany.mock.calls[0][0].where;
+    expect(fileWhere.size).toBeUndefined();
+    expect(fileWhere.messageAttachments).toEqual({
+      some: { message: { channelId: 'c1' } },
+    });
+    const fileAgeMs = Date.now() - fileWhere.uploadedAt.lt.getTime();
+    expect(fileAgeMs).toBeGreaterThan(14.9 * 86400000);
+    expect(fileAgeMs).toBeLessThan(15.1 * 86400000);
+    const msgWhere = messageFindMany.mock.calls[0][0].where;
+    expect(msgWhere.channelId).toBe('c1');
+    expect(msgWhere.attachments).toEqual({ none: {} });
+    expect(msgWhere.threadReplies).toEqual({ none: {} });
+    expect(decrementUserStorage).toHaveBeenCalledWith('u1', 1000);
   });
 
   it('does nothing when no files are expired', async () => {

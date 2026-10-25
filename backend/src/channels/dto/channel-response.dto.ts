@@ -14,6 +14,12 @@ export class ChannelDto {
   type: ChannelType;
   position: number;
   slowmodeSeconds: number;
+  /** Disappearing channel: messages older than this many days are deleted. */
+  @ApiProperty({ type: Number, nullable: true })
+  messageRetentionDays: number | null;
+  /** Disappearing channel: attachments older than this many days are wiped. */
+  @ApiProperty({ type: Number, nullable: true })
+  fileRetentionDays: number | null;
   isPrivate: boolean;
   /** Display label for the permission preset (enforcement uses overwrites). */
   @ApiProperty({ enum: ChannelPresetValues })
