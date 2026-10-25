@@ -1,5 +1,5 @@
 import { TestBed } from '@suites/unit';
-import { Logger } from '@nestjs/common';
+import { ConflictException, Logger } from '@nestjs/common';
 import { InviteService } from './invite.service';
 import { DatabaseService } from '@/database/database.service';
 import {
@@ -161,6 +161,40 @@ describe('InviteService', () => {
       loggerWarnSpy.mockRestore();
     });
 
+    it('should use a custom code when one is provided', async () => {
+      const creator = UserFactory.build();
+      const mockInvite = InstanceInviteFactory.build({ code: 'Welcome-2026' });
+
+      mockDatabase.instanceInvite.findUnique.mockResolvedValue(null);
+      mockDatabase.instanceInvite.create.mockResolvedValue(mockInvite);
+
+      const result = await service.createInvite(
+        creator,
+        undefined,
+        undefined,
+        [],
+        'Welcome-2026',
+      );
+
+      expect(result).toEqual(mockInvite);
+      expect(mockDatabase.instanceInvite.findFirst).not.toHaveBeenCalled();
+      const createCall = mockDatabase.instanceInvite.create.mock.calls[0][0];
+      expect(createCall.data.code).toBe('Welcome-2026');
+    });
+
+    it('should reject a custom code that is already taken', async () => {
+      const creator = UserFactory.build();
+
+      mockDatabase.instanceInvite.findUnique.mockResolvedValue(
+        InstanceInviteFactory.build({ code: 'taken' }),
+      );
+
+      await expect(
+        service.createInvite(creator, undefined, undefined, [], 'taken'),
+      ).rejects.toThrow(ConflictException);
+      expect(mockDatabase.instanceInvite.create).not.toHaveBeenCalled();
+    });
+
     it('should generate a 4-digit numeric code by default', async () => {
       const creator = UserFactory.build();
       const mockInvite = InstanceInviteFactory.build();
@@ -180,8 +214,10 @@ describe('InviteService', () => {
 
       mockDatabase.instanceInvite.findFirst
         .mockResolvedValueOnce(InstanceInviteFactory.build())
-        .mockImplementation(async (args: { where: { code: string } }) =>
-          args.where.code.length === 4 ? InstanceInviteFactory.build() : null,
+        .mockImplementation((args: { where: { code: string } }) =>
+          Promise.resolve(
+            args.where.code.length === 4 ? InstanceInviteFactory.build() : null,
+          ),
         );
       mockDatabase.instanceInvite.create.mockResolvedValue(mockInvite);
 

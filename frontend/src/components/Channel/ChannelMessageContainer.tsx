@@ -8,6 +8,7 @@ import LockIcon from "@mui/icons-material/Lock";
 import MessageContainerWrapper from "../Message/MessageContainerWrapper";
 import MemberListContainer from "../Message/MemberListContainer";
 import { MemberListDrawerButton } from "../Message/MemberListDrawerButton";
+import ChannelRetentionNotice from "./ChannelRetentionNotice";
 import MessageSearch from "../Message/MessageSearch";
 import { MessageSearchPanel } from "../Message/MessageSearchPanel";
 import { DockedSidePanel, DOCKED_PANEL_ATTR, type DockedPanelKind } from "./DockedSidePanel";
@@ -396,6 +397,8 @@ const ChannelMessageContainer: React.FC<ChannelMessageContainerProps> = ({
           onClose={handleSearchClose}
         />
       )}
+
+      <ChannelRetentionNotice channel={channel} />
 
       {/* Messages, and the docked side panel on wide desktop */}
       <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', minHeight: 0 }}>

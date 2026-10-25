@@ -8,6 +8,7 @@ import { FfmpegProvider } from '@/livekit/providers/ffmpeg.provider';
 export class ThumbnailService {
   private readonly logger = new Logger(ThumbnailService.name);
   private readonly uploadsDir: string;
+  private readonly fallbackDir?: string;
 
   constructor(
     private readonly configService: ConfigService,
@@ -16,6 +17,19 @@ export class ThumbnailService {
   ) {
     this.uploadsDir =
       this.configService.get<string>('FILE_UPLOAD_DEST') || './uploads';
+    this.fallbackDir =
+      this.configService.get<string>('FILE_UPLOAD_FALLBACK_DEST') || undefined;
+  }
+
+  /** Thumbnails live beside their video: in the fallback root if it landed there. */
+  private uploadRootFor(filePath: string): string {
+    if (
+      this.fallbackDir &&
+      path.resolve(filePath).startsWith(path.resolve(this.fallbackDir) + path.sep)
+    ) {
+      return this.fallbackDir;
+    }
+    return this.uploadsDir;
   }
 
   /**
@@ -38,7 +52,7 @@ export class ThumbnailService {
     fileId: string,
     storageType: StorageType = StorageType.LOCAL,
   ): Promise<string | null> {
-    const thumbnailDir = path.join(this.uploadsDir, 'thumbnails');
+    const thumbnailDir = path.join(this.uploadRootFor(filePath), 'thumbnails');
 
     if (storageType !== StorageType.LOCAL) {
       return this.generateAndUploadThumbnail(

@@ -8469,6 +8469,13 @@
       "CreateInviteDto": {
         "type": "object",
         "properties": {
+          "code": {
+            "type": "string",
+            "description": "A hand-picked code instead of a generated one (case-sensitive).",
+            "minLength": 3,
+            "maxLength": 32,
+            "pattern": "/^[A-Za-z0-9_-]+$/"
+          },
           "maxUses": {
             "type": "number",
             "minimum": 1
@@ -9032,6 +9039,16 @@
             "type": "number",
             "minimum": 0,
             "maximum": 21600
+          },
+          "messageRetentionDays": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 3650
+          },
+          "fileRetentionDays": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 3650
           }
         },
         "required": [
@@ -9081,6 +9098,16 @@
           "slowmodeSeconds": {
             "type": "number"
           },
+          "messageRetentionDays": {
+            "type": "number",
+            "nullable": true,
+            "description": "Disappearing channel: messages older than this many days are deleted."
+          },
+          "fileRetentionDays": {
+            "type": "number",
+            "nullable": true,
+            "description": "Disappearing channel: attachments older than this many days are wiped."
+          },
           "isPrivate": {
             "type": "boolean"
           }
@@ -9115,6 +9142,18 @@
           "position": {
             "type": "number",
             "minimum": 0
+          },
+          "messageRetentionDays": {
+            "type": "number",
+            "nullable": true,
+            "minimum": 1,
+            "maximum": 3650
+          },
+          "fileRetentionDays": {
+            "type": "number",
+            "nullable": true,
+            "minimum": 1,
+            "maximum": 3650
           }
         }
       },

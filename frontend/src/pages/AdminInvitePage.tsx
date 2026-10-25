@@ -69,6 +69,8 @@ const AdminInvitePage: React.FC = () => {
   const [filters, setFilters] = useState<InviteFilters>({ status: 'all', usage: 'all' });
 
   // Form state for creating invites
+  const [customCode, setCustomCode] = useState("");
+  const [createError, setCreateError] = useState<string | null>(null);
   const [maxUses, setMaxUses] = useState<number | undefined>(undefined);
   const [validUntil, setValidUntil] = useState<string>("");
   const [selectedCommunities, setSelectedCommunities] = useState<string[]>([]);
@@ -141,8 +143,10 @@ const AdminInvitePage: React.FC = () => {
   };
 
   const handleCreateInvite = async () => {
+    setCreateError(null);
     try {
       const createInviteDto: CreateInviteDto = {
+        code: customCode.trim() || undefined,
         communityIds: selectedCommunities.length > 0 ? selectedCommunities : [],
         maxUses: maxUses || undefined,
         validUntil: validUntil ? new Date(validUntil).toISOString() : undefined,
@@ -154,11 +158,16 @@ const AdminInvitePage: React.FC = () => {
       await handleCopyInvite(newInvite.code);
       
       setCreateDialogOpen(false);
+      setCustomCode("");
       setMaxUses(undefined);
       setValidUntil("");
       setSelectedCommunities([]);
     } catch (error) {
       logger.error("Failed to create invite:", error);
+      const message = (error as { message?: unknown } | null)?.message;
+      setCreateError(
+        typeof message === "string" ? message : Array.isArray(message) ? message.join(", ") : "Couldn't create the invite. Try again.",
+      );
     }
   };
 
@@ -527,6 +536,19 @@ const AdminInvitePage: React.FC = () => {
           </DialogContentText>
           
           <Box display="flex" flexDirection="column" gap={2}>
+            <TextField
+              label="Custom code"
+              value={customCode}
+              onChange={(e) => {
+                setCustomCode(e.target.value);
+                setCreateError(null);
+              }}
+              error={!!createError}
+              helperText={createError ?? "Type your own code (3-32 letters, numbers, - or _). Leave empty for a random 4-digit code"}
+              fullWidth
+              inputProps={{ maxLength: 32, autoCapitalize: "none", spellCheck: false }}
+            />
+
             <TextField
               label="Max Uses"
               type="number"

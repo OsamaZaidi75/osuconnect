@@ -3,9 +3,11 @@ import {
   Logger,
   NotFoundException,
   ForbiddenException,
+  ConflictException,
 } from '@nestjs/common';
 import { randomInt } from 'crypto';
 import { DatabaseService } from '@/database/database.service';
+import { isPrismaError } from '@/common/utils/prisma.utils';
 import { UserEntity } from '@/user/dto/user-response.dto';
 import {
   InstanceInvite,
@@ -33,7 +35,52 @@ export class InviteService {
     maxUses?: number,
     validUntil?: Date,
     communityIds: string[] = [],
+    customCode?: string,
   ): Promise<InstanceInviteWithRelations> {
+    let shortCode: string;
+    if (customCode) {
+      shortCode = customCode;
+      const taken = await this.databaseService.instanceInvite.findUnique({
+        where: { code: shortCode },
+        select: { id: true },
+      });
+      if (taken) {
+        throw new ConflictException('That invite code is already in use');
+      }
+    } else {
+      shortCode = await this.generateUniqueCode();
+    }
+
+    // Logic to create an invite for a user to join an instance
+    try {
+      return await this.databaseService.instanceInvite.create({
+        data: {
+          code: shortCode,
+          createdById: creator.id,
+          maxUses,
+          validUntil,
+          ...(communityIds.length > 0
+            ? {
+                defaultCommunities: {
+                  create: communityIds.map((communityId) => ({ communityId })),
+                },
+              }
+            : {}),
+        },
+        include: {
+          defaultCommunities: true,
+          usages: true,
+        },
+      });
+    } catch (error) {
+      if (customCode && isPrismaError(error, 'P2002')) {
+        throw new ConflictException('That invite code is already in use');
+      }
+      throw error;
+    }
+  }
+
+  private async generateUniqueCode(): Promise<string> {
     // generate a short numeric code for the invite
     let digits = INVITE_CODE_DIGITS;
     let attempts = 0;
@@ -50,27 +97,7 @@ export class InviteService {
       if (attempts % COLLISION_ATTEMPTS_PER_DIGIT === 0) digits++;
       shortCode = this.generateInviteCode(digits);
     }
-
-    // Logic to create an invite for a user to join an instance
-    return this.databaseService.instanceInvite.create({
-      data: {
-        code: shortCode,
-        createdById: creator.id,
-        maxUses,
-        validUntil,
-        ...(communityIds.length > 0
-          ? {
-              defaultCommunities: {
-                create: communityIds.map((communityId) => ({ communityId })),
-              },
-            }
-          : {}),
-      },
-      include: {
-        defaultCommunities: true,
-        usages: true,
-      },
-    });
+    return shortCode;
   }
 
   async validateInviteCode(

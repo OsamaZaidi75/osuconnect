@@ -41,12 +41,18 @@ services:
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD required}
       FILE_UPLOAD_DEST: /app/uploads
+      # Uploads go to FILE_UPLOAD_DEST (Azure Files) while it is mounted, writable
+      # and has room; otherwise to the local fallback (the Oracle data disk).
+      FILE_UPLOAD_FALLBACK_DEST: /app/uploads-fallback
+      FILE_UPLOAD_PRIMARY_MARKER: .osuconnect-primary
+      FILE_UPLOAD_PRIMARY_MIN_FREE_MB: ${FILE_UPLOAD_PRIMARY_MIN_FREE_MB:-1024}
       FILE_RETENTION_DAYS: ${FILE_RETENTION_DAYS:-0}
       FILE_RETENTION_MIN_SIZE_MB: ${FILE_RETENTION_MIN_SIZE_MB:-25}
       LIVEKIT_URL: wss://${PUBLIC_DOMAIN}/livekit
       LIVEKIT_INTERNAL_URL: http://livekit:7880
     volumes:
       - /mnt/azure-osuconnect:/app/uploads
+      - /data/osuconnect-uploads:/app/uploads-fallback
     depends_on:
       postgres:
         condition: service_healthy

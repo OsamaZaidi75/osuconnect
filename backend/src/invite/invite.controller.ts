@@ -40,6 +40,7 @@ export class InviteController {
       dto.maxUses,
       dto.validUntil,
       dto.communityIds,
+      dto.code,
     );
   }
 
