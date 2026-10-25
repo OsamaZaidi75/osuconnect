@@ -14,7 +14,7 @@ function upload(storage: TieredDiskStorage, content = 'hello'): Promise<Info> {
   return new Promise((resolve, reject) => {
     storage._handleFile(req as never, file, (error, info) => {
       if (error) {
-        reject(error instanceof Error ? error : new Error(String(error)));
+        reject(error instanceof Error ? error : new Error('upload failed'));
         return;
       }
       resolve(info as Info);
