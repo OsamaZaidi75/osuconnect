@@ -1,0 +1,124 @@
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Delete,
+  HttpCode,
+  UseGuards,
+  Req,
+  ParseUUIDPipe,
+} from '@nestjs/common';
+import { ApiOkResponse } from '@nestjs/swagger';
+import { JwtAuthGuard } from '@/auth/jwt-auth.guard';
+import { RbacGuard } from '@/auth/rbac.guard';
+import { RequiredActions } from '@/auth/rbac-action.decorator';
+import {
+  RbacResource,
+  RbacResourceType,
+  ResourceIdSource,
+} from '@/auth/rbac-resource.decorator';
+import { RbacActions } from '@prisma/client';
+import { DirectMessagesService } from './direct-messages.service';
+import { CreateDmGroupDto } from './dto/create-dm-group.dto';
+import { AddMembersDto } from './dto/add-members.dto';
+import { DmGroupResponseDto } from './dto/dm-group-response.dto';
+import { MessagesService } from '@/messages/messages.service';
+import { PaginatedMessagesResponseDto } from '@/messages/dto/message-response.dto';
+
+@Controller('direct-messages')
+@UseGuards(JwtAuthGuard, RbacGuard)
+export class DirectMessagesController {
+  constructor(
+    private readonly directMessagesService: DirectMessagesService,
+    private readonly messagesService: MessagesService,
+  ) {}
+
+  @Get()
+  async findUserDmGroups(
+    @Req() req: { user: { id: string } },
+  ): Promise<DmGroupResponseDto[]> {
+    return this.directMessagesService.findUserDmGroups(req.user.id);
+  }
+
+  @Post()
+  // No RBAC required - creating DMs is a basic user action available to all authenticated users
+  // The JwtAuthGuard already ensures the user is authenticated
+  async createDmGroup(
+    @Body() createDmGroupDto: CreateDmGroupDto,
+    @Req() req: { user: { id: string } },
+  ): Promise<DmGroupResponseDto> {
+    return this.directMessagesService.createDmGroup(
+      createDmGroupDto,
+      req.user.id,
+    );
+  }
+
+  @Get(':id')
+  @RequiredActions(RbacActions.READ_MESSAGE)
+  @RbacResource({
+    type: RbacResourceType.DM_GROUP,
+    idKey: 'id',
+    source: ResourceIdSource.PARAM,
+  })
+  async findDmGroup(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: { user: { id: string } },
+  ): Promise<DmGroupResponseDto> {
+    return this.directMessagesService.findDmGroup(id, req.user.id);
+  }
+
+  @Get(':id/messages')
+  @RequiredActions(RbacActions.READ_MESSAGE)
+  @RbacResource({
+    type: RbacResourceType.DM_GROUP,
+    idKey: 'id',
+    source: ResourceIdSource.PARAM,
+  })
+  @ApiOkResponse({ type: PaginatedMessagesResponseDto })
+  async getDmMessages(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: { user: { id: string } },
+  ): Promise<PaginatedMessagesResponseDto> {
+    // First verify user is a member of this DM group
+    await this.directMessagesService.findDmGroup(id, req.user.id);
+
+    // Then get the messages
+    return this.messagesService.findAllForDirectMessageGroup(id);
+  }
+
+  @Post(':id/members')
+  @RequiredActions(RbacActions.CREATE_MESSAGE)
+  @RbacResource({
+    type: RbacResourceType.DM_GROUP,
+    idKey: 'id',
+    source: ResourceIdSource.PARAM,
+  })
+  async addMembers(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() addMembersDto: AddMembersDto,
+    @Req() req: { user: { id: string } },
+  ): Promise<DmGroupResponseDto> {
+    return this.directMessagesService.addMembers(
+      id,
+      addMembersDto,
+      req.user.id,
+    );
+  }
+
+  @Delete(':id/members/me')
+  @HttpCode(204)
+  @RequiredActions(RbacActions.DELETE_MESSAGE)
+  @RbacResource({
+    type: RbacResourceType.DM_GROUP,
+    idKey: 'id',
+    source: ResourceIdSource.PARAM,
+  })
+  async leaveDmGroup(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: { user: { id: string } },
+  ): Promise<void> {
+    return this.directMessagesService.leaveDmGroup(id, req.user.id);
+  }
+}

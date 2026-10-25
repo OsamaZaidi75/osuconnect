@@ -1,0 +1,13 @@
+# Pre-existing vulnerability baseline (recorded 2026-06-10, PR #359).
+#
+# These advisories existed before image scanning was introduced. They are
+# grandfathered here so the Trivy gate stays BLOCKING for anything new;
+# remove entries as the corresponding dependency/base-image bumps land.
+# Keep in sync with the pnpm-audit baseline note in
+# .github/workflows/security-audit.yml.
+
+# --- backend image: npm transitive deps ---
+# extract-zip (dev/build-time only: @electron/get unpacks the Electron binary
+# at install; not shipped in app.asar or images. No fixed version upstream yet
+# — remove when one lands.) Added 2026-08-19 pre-v0.4.3 audit.
+CVE-2026-56876

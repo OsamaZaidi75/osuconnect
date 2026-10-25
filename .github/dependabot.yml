@@ -1,0 +1,140 @@
+version: 2
+
+# Notes (2026-09 backlog cleanup):
+# - The repo is ONE pnpm workspace (shared/, backend/, frontend/) with a single
+#   root pnpm-lock.yaml, so npm updates run from "/". The old /backend and
+#   /frontend entries predate the workspace and produced package-lock.json PRs.
+# - Security updates are grouped too (applies-to: security-updates), so an
+#   advisory wave becomes one PR instead of one job per package.
+# - Majors are never grouped: each gets its own PR for a changelog review.
+#   Exception: the Prisma packages, which must move in lockstep (see below).
+updates:
+  # npm: the whole pnpm workspace
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    # Must be >= pnpm's minimumReleaseAge (3 days, pnpm-workspace.yaml).
+    # Dependabot doesn't read that setting (dependabot-core#13405), so without
+    # a cooldown it proposes releases under 3 days old and pnpm rejects them
+    # (ERR_PNPM_NO_MATURE_MATCHING_VERSION), failing the whole group for the
+    # week. 4 days leaves a day of margin. Security updates skip this cooldown
+    # but pnpm still holds them until they are 3 days old.
+    cooldown:
+      default-days: 4
+    # Prisma is pinned exactly to 7.9.1 because the prisma@7.10.0 CLI has no
+    # npm provenance (published with a token outside trusted publishing).
+    # Skip that one release for all Prisma packages so the group stays in
+    # lockstep; later versions are still proposed. Check a proposed prisma
+    # release's provenance (npm view prisma@<ver> dist.attestations) first.
+    ignore:
+      - dependency-name: "prisma"
+        versions: ["7.10.0"]
+      - dependency-name: "@prisma/*"
+        versions: ["7.10.0"]
+      # Majors blocked on bigger migrations; each is tracked in an issue that
+      # says when to remove its rule. Minor and patch updates still flow.
+      # TypeScript 7 (native port) needs toolchain support first (#512)
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # Material UI 9 is a migration, not a bump (#526)
+      - dependency-name: "@mui/*"
+        update-types: ["version-update:semver-major"]
+      # livekit-client carries a pnpm patch keyed to its exact version
+      # (patches/livekit-client@2.22.3.patch: full reconnects lose
+      # TrackSubscribed). Any bump fails install with ERR_PNPM_UNUSED_PATCH and
+      # would block the whole grouped PR, so bump it by hand: check upstream
+      # RTCEngine.waitForRestarted, port or drop the patch per
+      # patches/README.md, then remove this rule if the patch is gone.
+      - dependency-name: "livekit-client"
+      # Node types follow the Node 24 runtime (Dockerfiles, CI); raise this
+      # with the runtime's major
+      - dependency-name: "@types/node"
+        versions: [">=25"]
+    groups:
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      # The Prisma CLI (prisma) and client (@prisma/client, @prisma/adapter-pg)
+      # must be on the same version, so they update in one PR, majors
+      # included: #468/#473 bumped them separately and neither could build.
+      prisma:
+        patterns:
+          - "prisma"
+          - "@prisma/*"
+        update-types:
+          - "major"
+          - "minor"
+          - "patch"
+      production-minor-patch:
+        dependency-type: "production"
+        update-types:
+          - "minor"
+          - "patch"
+      development-minor-patch:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "javascript"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+
+  # Docker base images. node stays on the active LTS line (24); its majors
+  # (e.g. non-LTS 25) are ignored. nginx/alpine minor and patch bumps flow through.
+  - package-ecosystem: "docker"
+    directories:
+      - "/backend"
+      - "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    ignore:
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
+    groups:
+      docker-images:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+
+  # Docs site (MkDocs)
+  - package-ecosystem: "pip"
+    directory: "/docs-site"
+    schedule:
+      interval: "monthly"
+    groups:
+      docs:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "documentation"

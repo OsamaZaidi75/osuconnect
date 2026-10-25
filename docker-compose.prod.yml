@@ -1,0 +1,100 @@
+# Production Docker Compose for Semaphore Chat
+#
+# Usage:
+#   1. Copy backend/env.sample to .env.prod — fill in JWT secrets, LiveKit config, etc.
+#   2. Add these extra vars to .env.prod for the database and cache:
+#        POSTGRES_PASSWORD=<strong-password>
+#        REDIS_PASSWORD=<strong-password>
+#   3. docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+#
+# See https://docs.semaphorechat.app/installation/docker-compose/ for the full guide.
+# For Kubernetes deployments, see the helm/ directory.
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.prod
+    env_file:
+      - .env.prod
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-semaphore}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/${POSTGRES_DB:-semaphore}
+      - REDIS_HOST=redis
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD required}
+      - FILE_UPLOAD_DEST=/app/uploads
+    ports:
+      # Localhost only. The frontend reaches the backend over the Compose network,
+      # and env.sample sets TRUST_PROXY=1 (the frontend's nginx is that one hop),
+      # so a client that reached this port directly could spoof its IP with an
+      # X-Forwarded-For header.
+      - "127.0.0.1:${BACKEND_PORT:-3000}:3000"
+    volumes:
+      # Persist uploaded files and generated thumbnails across container recreates
+      - uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      start_period: 40s
+      retries: 3
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile.prod
+      args:
+        VITE_API_URL: /api
+    environment:
+      - BACKEND_URL=http://backend:3000
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5173/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 10s
+      retries: 3
+
+  # NOTE: near-duplicate of the postgres service in docker-compose.yml and docker-compose.e2e.yml — keep image/healthcheck/env keys in sync.
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-semaphore}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_DB: ${POSTGRES_DB:-semaphore}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-semaphore}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # NOTE: near-duplicate of the redis service in docker-compose.yml and docker-compose.e2e.yml — keep image/healthcheck/env keys in sync.
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD required}", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+    volumes:
+      - redisdata:/data
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  uploads:

@@ -1,0 +1,54 @@
+name: Dependency Audit
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1' # weekly, Monday 06:00 UTC
+
+# PRs: a newer push cancels the superseded run. Scheduled runs get a unique
+# group (run_id) and are never cancelled or queued.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  audit:
+    name: pnpm audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      # Blocking: a key-name-based version bump once overwrote
+      # backend scripts.prisma with "^6.19.3". Fail if any scripts entry
+      # looks like a version instead of a command.
+      - name: Check package.json scripts are commands, not versions
+        run: node scripts/check-package-scripts.mjs
+
+      # Report-only for now: the full-workspace audit has a pre-existing
+      # baseline. The transitive tar/minimatch/lodash/path-to-regexp/
+      # socket.io-parser/defu/effect/axios advisories were cleared 2026-09;
+      # electron went to 39.8.10 the same month. The last one, extract-zip (no
+      # fixed version upstream; install-time only), left with Electron 44, which
+      # uses its own @electron-internal/extract-zip. A plain `continue-on-error`
+      # job still shows a red X on PRs, so the step downgrades the failure
+      # itself and surfaces the result in the step summary instead.
+      # TODO: remove the `|| ...` downgrade to make this blocking once the
+      # baseline is cleared.
+      - name: Audit production dependencies (report-only)
+        run: |
+          if pnpm audit --prod --audit-level high; then
+            echo "✅ pnpm audit: no high/critical advisories" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "⚠️ pnpm audit found high/critical advisories (report-only — see job log). Known baseline documented in this workflow file." >> "$GITHUB_STEP_SUMMARY"
+          fi

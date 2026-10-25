@@ -1,0 +1,656 @@
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  Typography,
+  Divider,
+  Box,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Button,
+  Paper,
+  Alert,
+  Chip,
+  LinearProgress,
+  ToggleButton,
+  ToggleButtonGroup,
+  IconButton,
+  Slider,
+  Switch,
+  FormControlLabel,
+} from '@mui/material';
+import {
+  Mic,
+  MicOff,
+  Videocam,
+  VideocamOff,
+  Refresh,
+  CheckCircle,
+  Error as ErrorIcon,
+  Keyboard,
+  VolumeUp,
+  InfoOutlined,
+} from '@mui/icons-material';
+import { useDeviceSettings, type MediaDeviceInfo as DeviceInfo } from '../../hooks/useDeviceSettings';
+import { useDeviceTest, getDeviceLabel } from '../../hooks/useDeviceTest';
+import { useVoiceSettings, VoiceInputMode } from '../../hooks/useVoiceSettings';
+import { MIC_QUALITY_OPTIONS, MIC_QUALITY_ORDER, type MicQuality } from '../../utils/voiceQuality';
+
+interface AudioVideoSettingsPanelProps {
+  /** Callback when user changes device selection (for live-switching during calls) */
+  onDeviceChange?: (type: 'audio' | 'video' | 'audioOutput', deviceId: string) => void;
+  /** When false, stops active device tests. Dialog passes `open` here. Default: true */
+  active?: boolean;
+  /** Whether to show the "Voice & Video" title row with refresh icon. Default: true */
+  showHeader?: boolean;
+}
+
+const AudioVideoSettingsPanel: React.FC<AudioVideoSettingsPanelProps> = ({
+  onDeviceChange,
+  active = true,
+  showHeader = true,
+}) => {
+  const [isRecordingKey, setIsRecordingKey] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  const {
+    audioInputDevices,
+    audioOutputDevices,
+    videoInputDevices,
+    selectedAudioInputId,
+    selectedAudioOutputId,
+    selectedVideoInputId,
+    setSelectedAudioInput,
+    setSelectedAudioOutput,
+    setSelectedVideoInput,
+    isLoading,
+    permissions,
+    requestPermissions,
+    enumerateDevices,
+    getAudioConstraints,
+    getVideoConstraints,
+  } = useDeviceSettings();
+
+  const {
+    testingAudio,
+    testingVideo,
+    audioLevel,
+    rawAudioLevel,
+    testAudioInput,
+    testVideoInput,
+    stopAudioTest,
+    stopVideoTest,
+  } = useDeviceTest({ videoRef, getAudioConstraints, getVideoConstraints });
+
+  const {
+    inputMode,
+    pushToTalkKeyDisplay,
+    voiceActivityThreshold,
+    echoCancellation,
+    noiseSuppression,
+    autoGainControl,
+    voiceIsolation,
+    micQuality,
+    setInputMode,
+    setPushToTalkKey,
+    setVoiceActivityThreshold,
+    setAudioProcessing,
+    setMicQuality,
+  } = useVoiceSettings();
+
+  const handleInputModeChange = (
+    _event: React.MouseEvent<HTMLElement>,
+    newMode: VoiceInputMode | null
+  ) => {
+    if (newMode) {
+      setInputMode(newMode);
+    }
+  };
+
+  // Handle key recording for PTT
+  useEffect(() => {
+    if (!isRecordingKey) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      // Ignore modifier keys alone
+      if (['Shift', 'Control', 'Alt', 'Meta'].includes(event.key)) {
+        return;
+      }
+
+      setPushToTalkKey(event);
+      setIsRecordingKey(false);
+    };
+
+    const handleBlur = () => {
+      setIsRecordingKey(false);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('blur', handleBlur);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, [isRecordingKey, setPushToTalkKey]);
+
+  // Stop device tests when panel becomes inactive (e.g., dialog closes)
+  useEffect(() => {
+    if (!active) {
+      stopAudioTest();
+      stopVideoTest();
+    }
+  }, [active, stopAudioTest, stopVideoTest]);
+
+  const handleRefreshDevices = async () => {
+    await requestPermissions();
+    await enumerateDevices();
+  };
+
+  const handleAudioInputChange = (deviceId: string) => {
+    setSelectedAudioInput(deviceId);
+    onDeviceChange?.('audio', deviceId);
+  };
+
+  const handleVideoInputChange = (deviceId: string) => {
+    setSelectedVideoInput(deviceId);
+    if (testingVideo) {
+      stopVideoTest();
+    }
+    onDeviceChange?.('video', deviceId);
+  };
+
+  const renderDeviceMenuItems = (devices: DeviceInfo[], selectedId: string) => {
+    if (devices.length === 0) {
+      return <MenuItem value="">No devices found</MenuItem>;
+    }
+    return [
+      selectedId !== 'default' &&
+        !devices.some(d => d.deviceId === selectedId) && (
+        <MenuItem key="__disconnected" value={selectedId} disabled>
+          Previously selected device (disconnected)
+        </MenuItem>
+      ),
+      ...devices.map((device) => (
+        <MenuItem key={device.deviceId} value={device.deviceId}>
+          {getDeviceLabel(device)}
+        </MenuItem>
+      )),
+    ];
+  };
+
+  return (
+    <Box>
+      {showHeader && (
+        <>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+            <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <VolumeUp /> Voice & Video
+            </Typography>
+            <IconButton onClick={handleRefreshDevices} disabled={isLoading} size="small">
+              <Refresh />
+            </IconButton>
+          </Box>
+          <Divider sx={{ mb: 3 }} />
+        </>
+      )}
+
+      {isLoading && <LinearProgress sx={{ mb: 2 }} />}
+
+      {/* Input Mode Section */}
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="subtitle2" gutterBottom>
+          Input Mode
+        </Typography>
+        <ToggleButtonGroup
+          value={inputMode}
+          exclusive
+          onChange={handleInputModeChange}
+          size="small"
+        >
+          <ToggleButton value="voice_activity">
+            Voice Activity
+          </ToggleButton>
+          <ToggleButton value="push_to_talk">
+            Push to Talk
+          </ToggleButton>
+        </ToggleButtonGroup>
+        <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+          {inputMode === 'voice_activity'
+            ? 'Your microphone is always active when unmuted'
+            : 'Hold a key to transmit audio'}
+        </Typography>
+      </Box>
+
+      {/* Push to Talk Key (only shown when PTT mode is selected) */}
+      {inputMode === 'push_to_talk' && (
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="subtitle2" gutterBottom>
+            Push to Talk Key
+          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Paper
+              sx={{
+                px: 2,
+                py: 1,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1,
+                minWidth: 120,
+                justifyContent: 'center',
+                bgcolor: isRecordingKey ? 'primary.main' : 'background.default',
+                color: isRecordingKey ? 'primary.contrastText' : 'text.primary',
+                transition: 'all 0.2s',
+              }}
+            >
+              <Keyboard fontSize="small" />
+              <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                {isRecordingKey ? 'Press a key...' : pushToTalkKeyDisplay}
+              </Typography>
+            </Paper>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => setIsRecordingKey(!isRecordingKey)}
+            >
+              {isRecordingKey ? 'Cancel' : 'Change Key'}
+            </Button>
+          </Box>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+            This key will activate your microphone while held
+          </Typography>
+        </Box>
+      )}
+
+      {/* Audio Processing Section */}
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="subtitle2" gutterBottom>
+          Audio Processing
+        </Typography>
+        <Box sx={{ display: 'flex', flexDirection: 'column', ml: 1 }}>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={echoCancellation}
+                onChange={(e) => setAudioProcessing('echoCancellation', e.target.checked)}
+                size="small"
+              />
+            }
+            label={
+              <Box>
+                <Typography variant="body2">Echo Cancellation</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Reduces echo from your speakers
+                </Typography>
+              </Box>
+            }
+          />
+          <FormControlLabel
+            control={
+              <Switch
+                checked={noiseSuppression}
+                onChange={(e) => setAudioProcessing('noiseSuppression', e.target.checked)}
+                size="small"
+              />
+            }
+            label={
+              <Box>
+                <Typography variant="body2">Noise Suppression</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Filters out steady background noise
+                </Typography>
+              </Box>
+            }
+          />
+          <FormControlLabel
+            control={
+              <Switch
+                checked={autoGainControl}
+                onChange={(e) => setAudioProcessing('autoGainControl', e.target.checked)}
+                size="small"
+              />
+            }
+            label={
+              <Box>
+                <Typography variant="body2">Auto Gain Control</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Automatically adjusts microphone volume
+                </Typography>
+              </Box>
+            }
+          />
+          <FormControlLabel
+            control={
+              <Switch
+                checked={voiceIsolation}
+                onChange={(e) => setAudioProcessing('voiceIsolation', e.target.checked)}
+                size="small"
+              />
+            }
+            label={
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                <Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <Typography variant="body2">Voice Isolation</Typography>
+                    <Chip label="Experimental" size="small" variant="outlined" color="warning" sx={{ height: 20, fontSize: 'scale.xs' }} />
+                  </Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Uses AI to isolate your voice
+                  </Typography>
+                </Box>
+              </Box>
+            }
+          />
+        </Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 1, ml: 1 }}>
+          <InfoOutlined sx={{ fontSize: 'icon.md', color: 'text.secondary' }} />
+          <Typography variant="caption" color="text.secondary">
+            Changes take effect the next time you join a voice channel.
+          </Typography>
+        </Box>
+      </Box>
+
+      {/* Microphone Quality Section */}
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="subtitle2" gutterBottom>
+          Microphone Quality
+        </Typography>
+        <FormControl fullWidth size="small">
+          <InputLabel id="mic-quality-label">Microphone quality</InputLabel>
+          <Select
+            labelId="mic-quality-label"
+            value={micQuality}
+            label="Microphone quality"
+            onChange={(e) => setMicQuality(e.target.value as MicQuality)}
+          >
+            {MIC_QUALITY_ORDER.map((quality) => (
+              <MenuItem key={quality} value={quality}>
+                {MIC_QUALITY_OPTIONS[quality].label}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+          {MIC_QUALITY_OPTIONS[micQuality].description} Applies the next time you join voice.
+        </Typography>
+      </Box>
+
+      <Divider sx={{ my: 3 }} />
+
+      {/* Audio Input Device */}
+      <Box sx={{ mb: 3 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+          <Typography variant="subtitle2">Microphone</Typography>
+          <Chip
+            size="small"
+            icon={permissions.microphone ? <CheckCircle /> : <ErrorIcon />}
+            label={permissions.microphone ? 'Granted' : 'Not Granted'}
+            color={permissions.microphone ? 'success' : 'error'}
+          />
+        </Box>
+        {!permissions.microphone && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            Microphone permission is required.{' '}
+            <Button size="small" onClick={requestPermissions}>
+              Request Permission
+            </Button>
+          </Alert>
+        )}
+        <FormControl fullWidth size="small">
+          <InputLabel>Microphone</InputLabel>
+          <Select
+            value={selectedAudioInputId}
+            label="Microphone"
+            onChange={(e) => handleAudioInputChange(e.target.value)}
+            disabled={!permissions.microphone || audioInputDevices.length === 0}
+          >
+            {renderDeviceMenuItems(audioInputDevices, selectedAudioInputId)}
+          </Select>
+        </FormControl>
+      </Box>
+
+      {/* Audio Output Device */}
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="subtitle2" gutterBottom>
+          Speakers
+        </Typography>
+        <FormControl fullWidth size="small">
+          <InputLabel>Speakers</InputLabel>
+          <Select
+            value={selectedAudioOutputId}
+            label="Speakers"
+            onChange={(e) => {
+              setSelectedAudioOutput(e.target.value);
+              onDeviceChange?.('audioOutput', e.target.value);
+            }}
+            disabled={audioOutputDevices.length === 0}
+          >
+            {renderDeviceMenuItems(audioOutputDevices, selectedAudioOutputId)}
+          </Select>
+        </FormControl>
+      </Box>
+
+      {/* Microphone Test */}
+      <Paper sx={{ p: 2, mb: 3, bgcolor: 'background.default' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Typography variant="subtitle2">Test Microphone</Typography>
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={testingAudio ? <MicOff /> : <Mic />}
+            onClick={testAudioInput}
+            disabled={!permissions.microphone}
+          >
+            {testingAudio ? 'Stop' : 'Test'}
+          </Button>
+        </Box>
+        {inputMode === 'voice_activity' && (
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+              Input Sensitivity
+            </Typography>
+            <Slider
+              value={voiceActivityThreshold}
+              onChange={(_, val) => setVoiceActivityThreshold(val as number)}
+              min={0}
+              max={100}
+              marks={[
+                { value: 0, label: 'High' },
+                { value: 50, label: 'Medium' },
+                { value: 100, label: 'Low' },
+              ]}
+              valueLabelDisplay="auto"
+              valueLabelFormat={(v) => `Sensitivity: ${100 - v}%`}
+              size="small"
+              aria-label="Input sensitivity"
+            />
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+              Drag the slider — or the marker on the meter below — to set the threshold.
+            </Typography>
+          </Box>
+        )}
+        {testingAudio && (
+          <Box sx={{ mt: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+              <Typography variant="caption" color="text.secondary">
+                Microphone Level
+              </Typography>
+              {inputMode === 'voice_activity' ? (
+                <Typography
+                  variant="caption"
+                  fontWeight="medium"
+                  color={rawAudioLevel > voiceActivityThreshold ? 'success.main' : 'text.secondary'}
+                >
+                  {rawAudioLevel > voiceActivityThreshold ? 'Transmitting' : 'Gated'}
+                </Typography>
+              ) : (
+                <Typography variant="caption" color="text.secondary">
+                  {Math.round(audioLevel)}%
+                </Typography>
+              )}
+            </Box>
+            <Box sx={{ position: 'relative', height: 8 }}>
+              <LinearProgress
+                variant="determinate"
+                value={inputMode === 'voice_activity' ? rawAudioLevel : audioLevel}
+                sx={{
+                  height: 8,
+                  borderRadius: 1,
+                  backgroundColor: 'grey.300',
+                  '& .MuiLinearProgress-bar': {
+                    backgroundColor: inputMode === 'voice_activity'
+                      ? (rawAudioLevel > voiceActivityThreshold ? 'success.main' : 'grey.500')
+                      : (audioLevel > 80 ? 'error.main' : audioLevel > 50 ? 'warning.main' : 'success.main'),
+                  },
+                }}
+              />
+              {inputMode === 'voice_activity' && (
+                <Slider
+                  data-testid="threshold-marker"
+                  value={voiceActivityThreshold}
+                  onChange={(_, val) => setVoiceActivityThreshold(val as number)}
+                  min={0}
+                  max={100}
+                  size="small"
+                  aria-label="Voice activity threshold"
+                  valueLabelDisplay="auto"
+                  valueLabelFormat={(v) => `Sensitivity: ${100 - v}%`}
+                  sx={{
+                    position: 'absolute',
+                    inset: 0,
+                    padding: 0,
+                    height: 8,
+                    '& .MuiSlider-rail': { opacity: 0 },
+                    '& .MuiSlider-track': { display: 'none' },
+                    '& .MuiSlider-thumb': {
+                      width: 4,
+                      height: 16,
+                      borderRadius: 1,
+                      backgroundColor: 'warning.main',
+                      boxShadow: 'none',
+                      '&:hover, &.Mui-focusVisible, &.Mui-active': { boxShadow: 'none' },
+                      '&::before, &::after': { display: 'none' },
+                    },
+                  }}
+                />
+              )}
+            </Box>
+            {inputMode === 'voice_activity' && (
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                The marker shows your sensitivity threshold — audio above it is transmitted.
+              </Typography>
+            )}
+          </Box>
+        )}
+        {!testingAudio && (
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+            Click "Test" and speak to verify your microphone
+          </Typography>
+        )}
+      </Paper>
+
+      <Divider sx={{ my: 3 }} />
+
+      {/* Video Input Device */}
+      <Box sx={{ mb: 3 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+          <Typography variant="subtitle2">Camera</Typography>
+          <Chip
+            size="small"
+            icon={permissions.camera ? <CheckCircle /> : <ErrorIcon />}
+            label={permissions.camera ? 'Granted' : 'Not Granted'}
+            color={permissions.camera ? 'success' : 'error'}
+          />
+        </Box>
+        {!permissions.camera && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            Camera permission is required.{' '}
+            <Button size="small" onClick={requestPermissions}>
+              Request Permission
+            </Button>
+          </Alert>
+        )}
+        <FormControl fullWidth size="small">
+          <InputLabel>Camera</InputLabel>
+          <Select
+            value={selectedVideoInputId}
+            label="Camera"
+            onChange={(e) => handleVideoInputChange(e.target.value)}
+            disabled={!permissions.camera || videoInputDevices.length === 0}
+          >
+            {renderDeviceMenuItems(videoInputDevices, selectedVideoInputId)}
+          </Select>
+        </FormControl>
+      </Box>
+
+      {/* Camera Test */}
+      <Paper sx={{ p: 2, mb: 3, bgcolor: 'background.default' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+          <Typography variant="subtitle2">Test Camera</Typography>
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={testingVideo ? <VideocamOff /> : <Videocam />}
+            onClick={testVideoInput}
+            disabled={!permissions.camera}
+          >
+            {testingVideo ? 'Stop' : 'Test'}
+          </Button>
+        </Box>
+        <Box
+          sx={{
+            width: '100%',
+            height: 200,
+            backgroundColor: 'grey.200',
+            borderRadius: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            overflow: 'hidden',
+          }}
+        >
+          {testingVideo ? (
+            <video
+              ref={videoRef}
+              autoPlay
+              muted
+              playsInline
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+              }}
+            />
+          ) : (
+            <Box sx={{ textAlign: 'center', color: 'text.secondary' }}>
+              <Videocam sx={{ fontSize: 'icon.5xl', mb: 1 }} />
+              <Typography variant="body2">
+                Click "Test" to preview your camera
+              </Typography>
+            </Box>
+          )}
+        </Box>
+      </Paper>
+
+      {/* Refresh Devices Button */}
+      {!showHeader && (
+        <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<Refresh />}
+            onClick={handleRefreshDevices}
+            disabled={isLoading}
+          >
+            Refresh Devices
+          </Button>
+        </Box>
+      )}
+    </Box>
+  );
+};
+
+export default AudioVideoSettingsPanel;

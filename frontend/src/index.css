@@ -1,0 +1,38 @@
+:root {
+  /* Full-viewport height: dvh where supported, vh fallback for older browsers. */
+  --full-dvh: 100vh;
+
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light dark;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@supports (min-height: 100dvh) {
+  :root {
+    --full-dvh: 100dvh;
+  }
+}
+
+html,
+body {
+  /* No pull-to-refresh / scroll chaining bounce outside the app shell. */
+  overscroll-behavior: none;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: var(--full-dvh);
+}
+
+#root {
+  width: 100%;
+}

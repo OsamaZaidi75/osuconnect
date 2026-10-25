@@ -1,0 +1,376 @@
+name: Build and Publish Docker Images
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'        # Full release
+      - 'docker-v*.*.*' # Docker-only release
+  # Every PR to main starts this workflow, so the image checks are always
+  # reported and can be required checks in the main ruleset (a workflow-level
+  # `paths` filter would skip the whole workflow, and a required check that
+  # is never reported blocks the PR forever). The `changes` job decides
+  # whether the PR can affect an image; if not, the build jobs are skipped,
+  # which GitHub counts as passing.
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version override (e.g., 1.0.1)'
+        type: string
+        required: false
+
+# PRs: one in-flight run per PR; a newer push cancels the superseded run.
+# Every other event (main/tag publish, manual dispatch) gets a unique group
+# (run_id), so it is never cancelled — and never queued behind, or replaced
+# while pending by, a newer run, which a shared group would still do even with
+# cancel-in-progress: false. That keeps publish runs exactly as before.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  REGISTRY: ghcr.io
+  # Will be set to github.repository (owner/repo)
+  IMAGE_NAME: ${{ github.repository }}
+
+# Buildx layer cache (GitHub Actions cache backend):
+# - One scope per image (backend-prod / frontend-prod). Previously every build
+#   here and in e2e-tests.yml exported into the shared default `buildkit`
+#   scope, so each export overwrote the others' cache index (near-constant
+#   misses) while still uploading hundreds of MB of blobs per run.
+# - Read everywhere, write only from main. Cache entries written on a PR ref
+#   are visible to that PR alone, so PR exports were pure churn: they pushed
+#   the repo past the 10 GB Actions cache limit and evicted the small caches
+#   (pnpm store, Playwright browsers). (GitHub already confines PR-written
+#   entries to the PR's own ref, so this is about churn, not trust.) Tag
+#   pushes don't write either: tag-ref entries are unusable by any other run.
+# - Publishing builds (anything but a PR) never reuse a cached `production`
+#   stage (no-cache-filters): its first step is `RUN apk upgrade`, and a
+#   stable per-image scope would otherwise keep serving that layer — with
+#   stale Alpine packages — until the base image digest changes. The builder
+#   stage (the expensive part) is still cached. The rebuilt layers are
+#   exported from main, so PR builds reuse main's latest production stage.
+# - mode=max, not min: the expensive work (pnpm install incl. dev deps,
+#   prisma generate, nest/vite build) lives in the `builder` stage, and
+#   mode=min exports only the final stage's layers, so every build would redo
+#   the builder stage from scratch. The extra export cost (~1-3 min when
+#   layers changed) is paid on main pushes only, off the PR critical path.
+# - ignore-error=true: a cache-service hiccup must never fail a publish.
+
+jobs:
+  # PRs only. Pushes to main, release tags and manual dispatch are unfiltered:
+  # `changes` is skipped, its outputs are empty, and both images build, scan
+  # and publish.
+  #
+  # Deny-list, deliberately not an allow-list: skip only PRs that cannot
+  # change either image or its Trivy result (docs, the Helm chart, root-level
+  # Markdown, other CI config). Everything else — Dockerfiles, lockfile,
+  # package.json files, patches/, shared/, .npmrc, .trivyignore, and any file
+  # a Dockerfile starts COPYing in the future — still builds + scans, so a
+  # Dockerfile or dependency change can't slip through. This workflow file
+  # is under the excluded .github/**, so it gets its own filter.
+  changes:
+    name: Detect image changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      images: ${{ steps.filter.outputs.images }}
+      workflow: ${{ steps.filter.outputs.workflow }}
+    steps:
+      # Lists the PR's files through the API (up to 3000), so no checkout is
+      # needed.
+      - name: Filter image-relevant paths
+        uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          # A file counts if it matches a pattern and none of the '!' ones.
+          predicate-quantifier: some-with-excludes
+          filters: |
+            images:
+              - '**'
+              - '!docs/**'
+              - '!docs-site/**'
+              - '!helm/**'
+              - '!*.md'
+              - '!.github/**'
+            workflow:
+              - '.github/workflows/docker-publish.yml'
+
+  # The jobs below skip only when `changes` positively reported no image
+  # changes ('false'). If `changes` was skipped (not a PR) or failed, the
+  # outputs are empty and they run: a broken filter builds and scans rather
+  # than skipping, which would count as passing. `!cancelled()` lets them
+  # start after a skipped or failed `changes`.
+  build-backend:
+    name: Build Backend Image
+    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.outputs.images != 'false' || needs.changes.outputs.workflow == 'true') }}
+    # packages: write is only used by the GHCR push (non-PR runs; job-level
+    # permissions can't vary by event). No step creates GitHub attestations
+    # or uses OIDC, so attestations/id-token are not requested.
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG_NAME="${{ github.ref_name }}"
+            # Remove prefix (v, docker-v, etc.)
+            VERSION="${TAG_NAME#docker-}"
+            VERSION="${VERSION#v}"
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "is_release=true" >> $GITHUB_OUTPUT
+          elif [[ -n "${{ inputs.version }}" ]]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+            echo "is_release=false" >> $GITHUB_OUTPUT
+          else
+            echo "version=" >> $GITHUB_OUTPUT
+            echo "is_release=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set version in package.json
+        if: steps.version.outputs.version != ''
+        run: |
+          cd backend && npm version ${{ steps.version.outputs.version }} --no-git-tag-version --allow-same-version
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Backend
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}},value=${{ steps.version.outputs.version }},enable=${{ steps.version.outputs.version != '' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.version }},enable=${{ steps.version.outputs.version != '' }}
+            type=semver,pattern={{major}},value=${{ steps.version.outputs.version }},enable=${{ steps.version.outputs.version != '' }}
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      # Push on main branch, release tags, and manual dispatch. Skipped on PRs,
+      # which build exactly once (the load-only step below) and scan that.
+      - name: Build and push Backend image
+        id: push-backend
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./backend/Dockerfile.prod
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64
+          cache-from: type=gha,scope=backend-prod
+          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,scope=backend-prod,mode=max,ignore-error=true' || '' }}
+          no-cache-filters: production
+          build-args: |
+            GITHUB_REPOSITORY=${{ github.repository }}
+            BUILD_DATE=${{ steps.meta.outputs.created }}
+
+      # Local single-platform image for the Trivy scan. On PRs this is the only
+      # build (reads main's cache, exports nothing). After a publish the
+      # builder stage is a local cache hit and the production stage is rebuilt
+      # fresh the same way as the push step (same no-cache-filters), seconds
+      # later, so the scan never checks staler Alpine packages than were pushed.
+      - name: Build Backend image for scan
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./backend/Dockerfile.prod
+          load: true
+          push: false
+          tags: scan-target-backend:latest
+          platforms: linux/amd64
+          cache-from: type=gha,scope=backend-prod
+          no-cache-filters: ${{ github.event_name != 'pull_request' && 'production' || '' }}
+          build-args: |
+            GITHUB_REPOSITORY=${{ github.repository }}
+            BUILD_DATE=${{ steps.meta.outputs.created }}
+
+      - name: Scan Backend image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: scan-target-backend:latest
+          format: table
+          exit-code: '1'
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          # Pre-existing baseline is grandfathered; new findings still fail.
+          trivyignores: .trivyignore
+
+  build-frontend:
+    name: Build Frontend Image
+    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.outputs.images != 'false' || needs.changes.outputs.workflow == 'true') }}
+    # packages: write is only used by the GHCR push (non-PR runs; job-level
+    # permissions can't vary by event). No step creates GitHub attestations
+    # or uses OIDC, so attestations/id-token are not requested.
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG_NAME="${{ github.ref_name }}"
+            # Remove prefix (v, docker-v, etc.)
+            VERSION="${TAG_NAME#docker-}"
+            VERSION="${VERSION#v}"
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "is_release=true" >> $GITHUB_OUTPUT
+          elif [[ -n "${{ inputs.version }}" ]]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+            echo "is_release=false" >> $GITHUB_OUTPUT
+          else
+            echo "version=" >> $GITHUB_OUTPUT
+            echo "is_release=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set version in package.json
+        if: steps.version.outputs.version != ''
+        run: |
+          cd frontend && npm version ${{ steps.version.outputs.version }} --no-git-tag-version --allow-same-version
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Frontend
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}},value=${{ steps.version.outputs.version }},enable=${{ steps.version.outputs.version != '' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.version }},enable=${{ steps.version.outputs.version != '' }}
+            type=semver,pattern={{major}},value=${{ steps.version.outputs.version }},enable=${{ steps.version.outputs.version != '' }}
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      # Push on main branch, release tags, and manual dispatch. Skipped on PRs,
+      # which build exactly once (the load-only step below) and scan that.
+      - name: Build and push Frontend image
+        id: push-frontend
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./frontend/Dockerfile.prod
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64
+          cache-from: type=gha,scope=frontend-prod
+          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,scope=frontend-prod,mode=max,ignore-error=true' || '' }}
+          no-cache-filters: production
+          build-args: |
+            GITHUB_REPOSITORY=${{ github.repository }}
+            BUILD_DATE=${{ steps.meta.outputs.created }}
+            VITE_API_URL=/api
+            VITE_WS_URL=
+
+      # Local single-platform image for the Trivy scan. On PRs this is the only
+      # build (reads main's cache, exports nothing). After a publish the
+      # builder stage is a local cache hit and the production stage is rebuilt
+      # fresh the same way as the push step (same no-cache-filters), seconds
+      # later, so the scan never checks staler Alpine packages than were pushed.
+      - name: Build Frontend image for scan
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./frontend/Dockerfile.prod
+          load: true
+          push: false
+          tags: scan-target-frontend:latest
+          platforms: linux/amd64
+          cache-from: type=gha,scope=frontend-prod
+          no-cache-filters: ${{ github.event_name != 'pull_request' && 'production' || '' }}
+          build-args: |
+            GITHUB_REPOSITORY=${{ github.repository }}
+            BUILD_DATE=${{ steps.meta.outputs.created }}
+            VITE_API_URL=/api
+            VITE_WS_URL=
+
+      - name: Scan Frontend image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: scan-target-frontend:latest
+          format: table
+          exit-code: '1'
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          # Pre-existing baseline is grandfathered; new findings still fail.
+          trivyignores: .trivyignore
+
+  summary:
+    name: Build Summary
+    runs-on: ubuntu-latest
+    needs: [changes, build-backend, build-frontend]
+    if: ${{ always() && (needs.changes.outputs.images != 'false' || needs.changes.outputs.workflow == 'true') }}
+
+    steps:
+      - name: Check build status
+        run: |
+          echo "## Docker Image Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.build-backend.result }}" == "success" ]; then
+            echo "✅ Backend image built successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Backend image build failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.build-frontend.result }}" == "success" ]; then
+            echo "✅ Frontend image built successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Frontend image build failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Image Tags" >> $GITHUB_STEP_SUMMARY
+          echo "- Backend: \`ghcr.io/${{ github.repository }}-backend\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Frontend: \`ghcr.io/${{ github.repository }}-frontend\`" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ github.ref_type }}" == "tag" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "📦 Release: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          fi

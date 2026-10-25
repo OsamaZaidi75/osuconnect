@@ -1,0 +1,112 @@
+import React from "react";
+import { useSearchParams, useNavigate, useLocation } from "react-router-dom";
+import MessageContainerWrapper from "../Message/MessageContainerWrapper";
+import MemberListContainer from "../Message/MemberListContainer";
+import { useJumpToMessage } from "../../hooks/useJumpToMessage";
+import { useMessageFileUpload } from "../../hooks/useMessageFileUpload";
+import { useQuery } from "@tanstack/react-query";
+import { directMessagesControllerFindDmGroupOptions } from "../../api-client/@tanstack/react-query.gen";
+import { useCurrentUser } from "../../hooks/useCurrentUser";
+import { useAutoMarkNotificationsRead } from "../../hooks/useAutoMarkNotificationsRead";
+import type { UserMention } from "../../utils/mentionParser";
+import { getDmHeaderName } from "../../utils/dmHelpers";
+import { VoiceSessionType } from "../../contexts/VoiceContext";
+import { useRegisterConversation, type ConversationTarget } from "../../contexts/ShortcutsContext";
+
+interface DirectMessageContainerProps {
+  dmGroupId: string;
+}
+
+const DirectMessageContainer: React.FC<DirectMessageContainerProps> = ({
+  dmGroupId,
+}) => {
+  const { user } = useCurrentUser();
+  const authorId = user?.id || "";
+
+  const { handleSendMessage } = useMessageFileUpload({
+    contextType: VoiceSessionType.Dm,
+    contextId: dmGroupId,
+    authorId,
+  });
+
+  // Get DM group info to get members for mentions
+  const { data: dmGroup } = useQuery(directMessagesControllerFindDmGroupOptions({ path: { id: dmGroupId } }));
+
+  // "Message @Alice" for a 1:1 DM, "Message <name>" for a named group, and
+  // "Message the group" for an unnamed one (its title is a long list of names).
+  const dmTitle = getDmHeaderName(dmGroup, user?.id);
+  const dmPlaceholder = !dmTitle
+    ? "Type a message..."
+    : dmGroup?.name
+      ? `Message ${dmGroup.name}`
+      : dmGroup?.isGroup
+        ? "Message the group"
+        : `Message @${dmTitle}`;
+
+  // Esc (global shortcut) marks the conversation read.
+  const shortcutTarget = React.useMemo<ConversationTarget>(() => ({ kind: "dm", id: dmGroupId }), [dmGroupId]);
+  useRegisterConversation(shortcutTarget);
+
+  // Auto-mark notifications as read when viewing this DM
+  useAutoMarkNotificationsRead({
+    contextType: VoiceSessionType.Dm,
+    contextId: dmGroupId,
+  });
+
+  // Get highlight message ID from URL params (for notification deep linking)
+  const [searchParams] = useSearchParams();
+  const dmNavigate = useNavigate();
+  const { pathname } = useLocation();
+  const highlightMessageId = searchParams.get("highlight");
+
+  // Convert DM group members to mention format
+  const userMentions: UserMention[] = React.useMemo(() => {
+    return dmGroup?.members?.map((member) => ({
+      id: member.user.id,
+      username: member.user.username,
+      displayName: member.user.displayName || undefined,
+    })) || [];
+  }, [dmGroup?.members]);
+
+  // Get messages using the jump-to-message hook (supports anchored mode for notification deep links)
+  const messagesHookResult = useJumpToMessage('dm', dmGroupId, highlightMessageId || undefined);
+  const { isJumpPending } = messagesHookResult;
+
+  // Clear the highlight param from the URL once the jump has settled.
+  // useJumpToMessage keeps the id locally for scroll/flash (3s auto-clear).
+  // Only `highlight` is dropped: the pathname stays as-is, because the
+  // phone/tablet navigation parser reads the DM from `/direct-messages/:id`
+  // and would fall back to the DM list on a bare `/direct-messages?group=`.
+  React.useEffect(() => {
+    if (highlightMessageId && !isJumpPending) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("highlight");
+      const query = next.toString();
+      dmNavigate(`${pathname}${query ? `?${query}` : ""}`, { replace: true });
+    }
+  }, [highlightMessageId, isJumpPending, searchParams, pathname, dmNavigate]);
+
+  // Create member list component for the DM group
+  const memberListComponent = (
+    <MemberListContainer
+      contextType={VoiceSessionType.Dm}
+      contextId={dmGroupId}
+    />
+  );
+
+  return (
+    <MessageContainerWrapper
+      contextType={VoiceSessionType.Dm}
+      contextId={dmGroupId}
+      useMessagesHook={() => messagesHookResult}
+      userMentions={userMentions}
+      onSendMessage={handleSendMessage}
+      memberListComponent={memberListComponent}
+      placeholder={dmPlaceholder}
+      emptyStateMessage="No messages yet. Start the conversation!"
+      highlightMessageId={messagesHookResult.highlightMessageId}
+    />
+  );
+};
+
+export default DirectMessageContainer;
