@@ -35,7 +35,7 @@ const InstallAppSettings: React.FC = () => {
         </Typography>
         <Divider sx={{ mb: 2 }} />
         <Typography variant="body2" color="text.secondary" paragraph>
-          Install Semaphore Chat on this device for faster access, its own
+          Install OsuConnect on this device for faster access, its own
           window, and better notification support.
         </Typography>
         <Box>

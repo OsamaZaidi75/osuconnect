@@ -32,8 +32,8 @@ export default defineConfig({
       includeAssets: ["favicon.ico", "favicon-32x32.png", "favicon-16x16.png", "apple-touch-icon.png"],
       manifest: {
         id: "/",
-        name: "Semaphore Chat",
-        short_name: "Semaphore Chat",
+        name: "OsuConnect",
+        short_name: "OsuConnect",
         description: "Self-hosted voice and text chat",
         theme_color: "#1a1a2e",
         background_color: "#1a1a2e",

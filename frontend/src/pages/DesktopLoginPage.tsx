@@ -95,7 +95,7 @@ const DesktopLoginPage: React.FC<DesktopLoginPageProps> = ({
           This sign-in link doesn&apos;t work
         </Typography>
         <Typography variant="body2" color="text.secondary" textAlign="center">
-          It&apos;s incomplete or damaged. In the Semaphore Chat desktop app, choose
+          It&apos;s incomplete or damaged. In the OsuConnect desktop app, choose
           &ldquo;Sign in with browser&rdquo; again.
         </Typography>
       </Card>
@@ -129,7 +129,7 @@ const DesktopLoginPage: React.FC<DesktopLoginPageProps> = ({
           Return to the desktop app
         </Typography>
         <Typography variant="body2" color="text.secondary" textAlign="center">
-          Semaphore Chat is finishing signing you in. If nothing happens, make sure the app
+          OsuConnect is finishing signing you in. If nothing happens, make sure the app
           is still open and try &ldquo;Sign in with browser&rdquo; again.
         </Typography>
       </Card>
@@ -162,7 +162,7 @@ const DesktopLoginPage: React.FC<DesktopLoginPageProps> = ({
         </Box>
       ) : (
         <Typography variant="body1" textAlign="center" sx={{ overflowWrap: "anywhere" }}>
-          The Semaphore Chat app on this computer will be signed in as{" "}
+          The OsuConnect app on this computer will be signed in as{" "}
           <strong>{who}</strong>
           {user && user.displayName && user.displayName !== user.username && (
             <> (@{user.username})</>

@@ -253,10 +253,10 @@ describe('toast queue', () => {
       </>,
     );
     expect(screen.getByText('Update available')).toBeInTheDocument();
-    expect(screen.queryByText('Install Semaphore Chat')).not.toBeInTheDocument();
+    expect(screen.queryByText('Install OsuConnect')).not.toBeInTheDocument();
 
     act(() => setUpdateAvailable(false));
-    expect(screen.getByText('Install Semaphore Chat')).toBeInTheDocument();
+    expect(screen.getByText('Install OsuConnect')).toBeInTheDocument();
   });
 
   it('places the toast above the registered chrome', () => {

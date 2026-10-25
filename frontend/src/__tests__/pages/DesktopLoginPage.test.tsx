@@ -59,7 +59,7 @@ describe('DesktopLoginPage', () => {
 
     expect(screen.getByRole('heading', { name: /sign in to the desktop app\?/i })).toBeInTheDocument();
     expect(screen.getByText(/will be signed in as/i)).toHaveTextContent(
-      'The Semaphore Chat app on this computer will be signed in as Alice Liddell (@alice).',
+      'The OsuConnect app on this computer will be signed in as Alice Liddell (@alice).',
     );
     expect(screen.getByText(/Not Alice Liddell\?/)).toBeInTheDocument();
     expect(screen.getByText(/never continue from a link someone sent you/i)).toBeInTheDocument();

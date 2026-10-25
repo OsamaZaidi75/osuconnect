@@ -89,13 +89,13 @@ export class MailerService {
     await transporter.sendMail({
       from,
       to,
-      subject: 'Reset your Semaphore Chat password',
+      subject: 'Reset your OsuConnect password',
       text:
-        'We received a request to reset your Semaphore Chat password.\n\n' +
+        'We received a request to reset your OsuConnect password.\n\n' +
         `Open this link to choose a new password (valid for 1 hour):\n${resetUrl}\n\n` +
         "If you didn't request this, you can safely ignore this email.",
       html:
-        '<p>We received a request to reset your Semaphore Chat password.</p>' +
+        '<p>We received a request to reset your OsuConnect password.</p>' +
         `<p><a href="${resetUrl}">Click here to choose a new password</a> (valid for 1 hour).</p>` +
         "<p>If you didn't request this, you can safely ignore this email.</p>",
     });

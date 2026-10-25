@@ -187,13 +187,13 @@ export const ConnectionWizard: React.FC<ConnectionWizardProps> = ({ open, onComp
         return (
           <Box sx={{ textAlign: 'center', py: 4 }}>
             <Typography variant="h5" gutterBottom>
-              Welcome to Semaphore Chat!
+              Welcome to OsuConnect!
             </Typography>
             <Typography variant="body1" color="text.secondary" paragraph>
-              Let's get you connected to a Semaphore Chat server.
+              Let's get you connected to an OsuConnect server.
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              You'll need the URL of your Semaphore Chat server to continue.
+              You'll need the URL of your OsuConnect server to continue.
             </Typography>
           </Box>
         );
@@ -219,7 +219,7 @@ export const ConnectionWizard: React.FC<ConnectionWizardProps> = ({ open, onComp
             <TextField
               fullWidth
               label="Server Name (Optional)"
-              placeholder="My Semaphore Chat Server"
+              placeholder="My OsuConnect Server"
               value={serverName}
               onChange={(e) => setServerName(e.target.value)}
               helperText="A friendly name to identify this server"
@@ -256,7 +256,7 @@ export const ConnectionWizard: React.FC<ConnectionWizardProps> = ({ open, onComp
             <Typography variant="body2" color="text.secondary">
               {browserLoginSupported
                 ? "You're all set! Sign in with your browser to use its password manager, or continue to sign in here."
-                : "You're all set! Click finish to start using Semaphore Chat."}
+                : "You're all set! Click finish to start using OsuConnect."}
             </Typography>
           </Box>
         );

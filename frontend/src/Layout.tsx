@@ -18,7 +18,7 @@ import { LayoutProviders } from "./components/LayoutProviders";
 const Layout: React.FC = () => {
   const { user: userData } = useCurrentUser();
   const { data: publicSettings } = useQuery(instanceControllerGetPublicSettingsOptions());
-  const instanceName = publicSettings?.name || "Semaphore Chat";
+  const instanceName = publicSettings?.name || "OsuConnect";
   const { isMobile, isTablet } = useResponsive();
   const { state: voiceState, actions: voiceActions } = useVoiceConnection();
 

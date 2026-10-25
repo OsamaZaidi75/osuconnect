@@ -18,7 +18,7 @@ export class InstanceService {
     if (!settings) {
       settings = await this.db.instanceSettings.create({
         data: {
-          name: 'Semaphore Chat',
+          name: 'OsuConnect',
           description: null,
           registrationMode: RegistrationMode.INVITE_ONLY,
         },

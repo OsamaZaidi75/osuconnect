@@ -70,7 +70,7 @@ describe('useVoiceMediaSession', () => {
 
     expect(mockSession.metadata).toMatchObject({
       title: 'General Voice',
-      artist: 'Semaphore Chat',
+      artist: 'OsuConnect',
     });
     expect(mockSession.playbackState).toBe('playing');
     expect(mockSession.setActionHandler).toHaveBeenCalledWith('hangup', expect.any(Function));

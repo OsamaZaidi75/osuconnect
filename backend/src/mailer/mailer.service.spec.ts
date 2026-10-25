@@ -87,7 +87,7 @@ describe('MailerService', () => {
       };
       expect(call.from).toBe('noreply@example.com');
       expect(call.to).toBe('user@example.com');
-      expect(call.subject).toBe('Reset your Semaphore Chat password');
+      expect(call.subject).toBe('Reset your OsuConnect password');
       expect(call.text).toContain(
         'https://chat.example.com/reset-password?token=abc123',
       );

@@ -45,7 +45,7 @@ const DownloadCard: React.FC = () => (
   >
     <DesktopIcon color="primary" sx={{ fontSize: "icon.2xl" }} />
     <Box sx={{ flex: "1 1 200px", minWidth: 0 }}>
-      <Typography variant="subtitle2">Get Semaphore Chat Desktop</Typography>
+      <Typography variant="subtitle2">Get OsuConnect Desktop</Typography>
       <Typography variant="body2" color="text.secondary">
         Available for Windows and Linux
       </Typography>

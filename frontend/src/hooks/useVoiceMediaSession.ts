@@ -56,7 +56,7 @@ export function useVoiceMediaSession({
 
     mediaSession.metadata = new MediaMetadata({
       title: contextName ?? 'Voice call',
-      artist: 'Semaphore Chat',
+      artist: 'OsuConnect',
     });
     mediaSession.playbackState = 'playing';
     trySetHandler('hangup', () => onHangup());

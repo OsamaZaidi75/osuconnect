@@ -232,7 +232,7 @@ export class OnboardingService {
                 {
                   position: 0,
                   type: 'PLAINTEXT',
-                  text: `Welcome to ${dto.instanceName}! 🎉\n\nThis is your new Semaphore Chat instance. You can start by:\n• Inviting other users to join\n• Creating more communities and channels\n• Customizing your community settings\n\nEnjoy your new chat platform!`,
+                  text: `Welcome to ${dto.instanceName}! 🎉\n\nThis is your new OsuConnect instance. You can start by:\n• Inviting other users to join\n• Creating more communities and channels\n• Customizing your community settings\n\nEnjoy your new chat platform!`,
                 },
               ],
             },

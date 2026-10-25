@@ -60,7 +60,7 @@ describe('InstanceService', () => {
       expect(result).toEqual(mockNewSettings);
       expect(mockDatabase.instanceSettings.create).toHaveBeenCalledWith({
         data: {
-          name: 'Semaphore Chat',
+          name: 'OsuConnect',
           description: null,
           registrationMode: RegistrationMode.INVITE_ONLY,
         },
