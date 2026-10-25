@@ -56,11 +56,10 @@ const MAX_SEGMENT_LENGTH = 200;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * Invite codes are NOT ids — they're `randomBytes(12).toString('base64url')`
- * (see backend/src/invite/invite.service.ts `generateInviteCode`), i.e.
- * base64url characters, not fixed to exactly 12 chars if that default ever
- * changes. Validated against the base64url alphabet with a generous length
- * cap rather than an exact-length match, for the same fail-safe reasoning
+ * Invite codes are NOT ids — they're short numeric codes (4 digits by default,
+ * see backend/src/invite/invite.service.ts `generateInviteCode`). Older codes
+ * were base64url, so validate against the base64url alphabet with a generous
+ * length cap rather than an exact-length match, for the same fail-safe reasoning
  * as UUIDs above.
  */
 const INVITE_CODE_RE = /^[A-Za-z0-9_-]{1,64}$/;

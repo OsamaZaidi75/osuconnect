@@ -4,7 +4,7 @@ import {
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
-import { randomBytes } from 'crypto';
+import { randomInt } from 'crypto';
 import { DatabaseService } from '@/database/database.service';
 import { UserEntity } from '@/user/dto/user-response.dto';
 import {
@@ -13,6 +13,9 @@ import {
   InstanceInviteUsage,
   Prisma,
 } from '@prisma/client';
+
+const INVITE_CODE_DIGITS = 4;
+const COLLISION_ATTEMPTS_PER_DIGIT = 20;
 
 export type InstanceInviteWithRelations = InstanceInvite & {
   defaultCommunities: InstanceInviteDefaultCommunity[];
@@ -31,17 +34,21 @@ export class InviteService {
     validUntil?: Date,
     communityIds: string[] = [],
   ): Promise<InstanceInviteWithRelations> {
-    // generate a short code for the invite
-    let shortCode = this.generateInviteCode();
+    // generate a short numeric code for the invite
+    let digits = INVITE_CODE_DIGITS;
+    let attempts = 0;
+    let shortCode = this.generateInviteCode(digits);
     // Check if the short code already exists
     while (
       await this.databaseService.instanceInvite.findFirst({
         where: { code: shortCode },
       })
     ) {
-      // If it does, generate a new one
+      // If it does, generate a new one; widen the code if the space is crowded
       this.logger.warn(`Short code ${shortCode} collision! Generating new one`);
-      shortCode = this.generateInviteCode();
+      attempts++;
+      if (attempts % COLLISION_ATTEMPTS_PER_DIGIT === 0) digits++;
+      shortCode = this.generateInviteCode(digits);
     }
 
     // Logic to create an invite for a user to join an instance
@@ -213,7 +220,9 @@ export class InviteService {
     });
   }
 
-  private generateInviteCode(length: number = 12) {
-    return randomBytes(length).toString('base64url').slice(0, length);
+  private generateInviteCode(digits: number = INVITE_CODE_DIGITS) {
+    return randomInt(0, 10 ** digits)
+      .toString()
+      .padStart(digits, '0');
   }
 }

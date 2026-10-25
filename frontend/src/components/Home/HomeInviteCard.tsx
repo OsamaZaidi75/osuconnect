@@ -15,6 +15,7 @@ import { invalidateInviteQueries } from "../../utils/queryInvalidation";
 import { copyToClipboard } from "../../utils/clipboard";
 import { getInstanceUrl } from "../../config/env";
 import { logger } from "../../utils/logger";
+import { buildQuickInviteBody, inviteUrl as buildInviteUrl } from "../../utils/quickInvite";
 import type { CreateInviteDto } from "../../types/invite.type";
 
 export const INVITE_CARD_DISMISSED_KEY = "semaphore:home:inviteCardDismissed";
@@ -35,7 +36,7 @@ function writeDismissed() {
   }
 }
 
-const inviteUrl = (code: string) => `${getInstanceUrl()}/#/join/${code}`;
+const inviteUrl = (code: string) => buildInviteUrl(getInstanceUrl(), code);
 
 /**
  * Whether Home shows the invite card (the user may create instance invites and
@@ -86,13 +87,7 @@ const HomeInviteCard: React.FC<HomeInviteCardProps> = ({ communities, onDismiss 
 
   const handleQuickInvite = async () => {
     try {
-      // Prefer a community called "default", else every community you're in.
-      const defaultCommunity = communities.find((c) => c.name.toLowerCase() === "default");
-      const body: CreateInviteDto = {
-        communityIds: defaultCommunity ? [defaultCommunity.id] : communities.map((c) => c.id),
-        maxUses: 10,
-        validUntil: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-      };
+      const body: CreateInviteDto = buildQuickInviteBody(communities);
       const invite = await createInvite({ body });
       setLastCode(invite.code);
       try {
@@ -131,7 +126,7 @@ const HomeInviteCard: React.FC<HomeInviteCardProps> = ({ communities, onDismiss 
       <Box sx={{ flex: "1 1 200px", minWidth: 0 }}>
         <Typography variant="subtitle2">Invite people</Typography>
         <Typography variant="body2" color="text.secondary">
-          Create a 7-day invite link and copy it to your clipboard.
+          Create a 24-hour invite code and link and copy it to your clipboard.
         </Typography>
       </Box>
       <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>

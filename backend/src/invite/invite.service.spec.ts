@@ -161,7 +161,7 @@ describe('InviteService', () => {
       loggerWarnSpy.mockRestore();
     });
 
-    it('should generate 12-character code by default', async () => {
+    it('should generate a 4-digit numeric code by default', async () => {
       const creator = UserFactory.build();
       const mockInvite = InstanceInviteFactory.build();
 
@@ -171,7 +171,30 @@ describe('InviteService', () => {
       await service.createInvite(creator);
 
       const createCall = mockDatabase.instanceInvite.create.mock.calls[0][0];
-      expect(createCall.data.code).toHaveLength(12);
+      expect(createCall.data.code).toMatch(/^\d{4}$/);
+    });
+
+    it('should widen the code after repeated collisions', async () => {
+      const creator = UserFactory.build();
+      const mockInvite = InstanceInviteFactory.build();
+
+      mockDatabase.instanceInvite.findFirst
+        .mockResolvedValueOnce(InstanceInviteFactory.build())
+        .mockImplementation(async (args: { where: { code: string } }) =>
+          args.where.code.length === 4 ? InstanceInviteFactory.build() : null,
+        );
+      mockDatabase.instanceInvite.create.mockResolvedValue(mockInvite);
+
+      const loggerWarnSpy = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation();
+
+      await service.createInvite(creator);
+
+      const createCall = mockDatabase.instanceInvite.create.mock.calls[0][0];
+      expect(createCall.data.code).toMatch(/^\d{5}$/);
+
+      loggerWarnSpy.mockRestore();
     });
   });
 

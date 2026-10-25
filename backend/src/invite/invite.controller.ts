@@ -56,7 +56,8 @@ export class InviteController {
 
   @Get('public/:code')
   @Public()
-  @Throttle({ short: { limit: 5, ttl: 1000 }, long: { limit: 20, ttl: 60000 } })
+  // Codes are only 4 digits, so keep guessing slow.
+  @Throttle({ short: { limit: 2, ttl: 1000 }, long: { limit: 8, ttl: 60000 } })
   @ApiOkResponse({ type: InviteResponseDto })
   async getPublicInvite(
     @Param('code') code: string,

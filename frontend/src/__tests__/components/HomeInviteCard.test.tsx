@@ -66,7 +66,7 @@ describe('HomeInviteCard', () => {
     localStorage.clear();
   });
 
-  it('Quick invite creates a 10-use, 7-day invite for every community and copies its link', async () => {
+  it('Quick invite creates a 5-use, 24-hour invite for every community and copies its link', async () => {
     server.use(inviteCreated('ABC123'));
     const before = Date.now();
     const { user } = renderWithProviders(
@@ -80,10 +80,10 @@ describe('HomeInviteCard', () => {
     expect(screen.getByText('ABC123')).toBeInTheDocument();
     expect(createdBodies).toHaveLength(1);
     expect(createdBodies[0].communityIds).toEqual(['c1', 'c2']);
-    expect(createdBodies[0].maxUses).toBe(10);
+    expect(createdBodies[0].maxUses).toBe(5);
     const validFor = new Date(createdBodies[0].validUntil!).getTime() - before;
-    expect(validFor).toBeGreaterThan(6.9 * 24 * 3600 * 1000);
-    expect(validFor).toBeLessThan(7.1 * 24 * 3600 * 1000);
+    expect(validFor).toBeGreaterThan(23.9 * 3600 * 1000);
+    expect(validFor).toBeLessThan(24.1 * 3600 * 1000);
   });
 
   it('prefers a community called "default" when there is one', async () => {

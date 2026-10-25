@@ -11,6 +11,7 @@ import { Divider, IconButton, Tooltip, Typography } from "@mui/material";
 import GroupsOutlinedIcon from "@mui/icons-material/GroupsOutlined";
 import ChatIcon from "@mui/icons-material/Chat";
 import NotificationsNoneIcon from "@mui/icons-material/NotificationsNone";
+import PersonAddIcon from "@mui/icons-material/PersonAdd";
 import MenuIcon from "@mui/icons-material/Menu";
 import MenuOpenIcon from "@mui/icons-material/MenuOpen";
 import { useParams, useNavigate } from "react-router-dom";
@@ -18,6 +19,7 @@ import CommunityListItem from "./CommunityListItem";
 import CreateCommunityButton from "./CreateCommunityButton";
 import { RailNavButton } from "./RailNavButton";
 import { RailUserMenu } from "../Desktop/RailUserMenu";
+import QuickInviteDialog from "../Home/QuickInviteDialog";
 import { useCanPerformAction } from "../../features/roles/useUserPermissions";
 import { RBAC_ACTIONS } from "../../constants/rbacActions";
 import { useReadReceipts } from "../../hooks/useReadReceipts";
@@ -101,6 +103,8 @@ const CommunityToggle: React.FC<CommunityToggleProps> = ({
   const { communityId } = useParams();
   const navigate = useNavigate();
   const canCreateCommunity = useCanPerformAction("INSTANCE", undefined, RBAC_ACTIONS.CREATE_COMMUNITY);
+  const canCreateInvite = useCanPerformAction("INSTANCE", undefined, RBAC_ACTIONS.CREATE_INSTANCE_INVITE);
+  const [inviteOpen, setInviteOpen] = React.useState(false);
   const { totalDmUnreadCount: totalDmUnread } = useReadReceipts();
   const unreadNotifications = unread?.count ?? 0;
   const topInset = useTopChromeHeight();
@@ -132,7 +136,18 @@ const CommunityToggle: React.FC<CommunityToggleProps> = ({
           badgeContent={unreadNotifications}
           avatarSx={{ bgcolor: "action.selected" }}
         />
+        {canCreateInvite && (
+          <RailNavButton
+            label="Invite"
+            ariaLabel="Invite a friend"
+            icon={<PersonAddIcon sx={{ color: "text.primary" }} />}
+            onClick={() => setInviteOpen(true)}
+            isExpanded={isExpanded}
+            avatarSx={{ bgcolor: "action.selected" }}
+          />
+        )}
       </Section>
+      {inviteOpen && <QuickInviteDialog open onClose={() => setInviteOpen(false)} />}
       <Divider sx={{ mx: 2 }} />
       <Box sx={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", py: 1.5 }}>
         <Section expanded={isExpanded} sx={{ gap: 1.5 }}>
