@@ -47,6 +47,12 @@ export class UserService {
     });
   }
 
+  async findByEmail(email: string): Promise<User | null> {
+    return this.databaseService.user.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' } },
+    });
+  }
+
   async findById(id: string): Promise<User | null> {
     return this.databaseService.user.findUnique({
       where: { id },

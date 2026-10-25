@@ -184,7 +184,8 @@ const LoginPage: React.FC = () => {
         )}
         <TextField
           id="username"
-          label="Username"
+          label="Username or email"
+          autoComplete="username"
           variant="outlined"
           fullWidth
           value={username}

@@ -153,6 +153,41 @@ describe('AuthService', () => {
 
       expect(userService.findByUsername).toHaveBeenCalledWith('testuser');
     });
+
+    it('should look the user up by email when the identifier contains @', async () => {
+      const mockUser = UserFactory.build({
+        username: 'testuser',
+        email: 'Test.User@gmail.com',
+        hashedPassword: 'hashed-password',
+      });
+
+      jest.spyOn(userService, 'findByEmail').mockResolvedValue(mockUser);
+      mockBcrypt.compare.mockResolvedValue(true as never);
+
+      const result = await service.validateUser(
+        '  Test.User@Gmail.com ',
+        'password',
+      );
+
+      expect(result?.id).toBe(mockUser.id);
+      expect(userService.findByEmail).toHaveBeenCalledWith(
+        'test.user@gmail.com',
+      );
+      expect(userService.findByUsername).not.toHaveBeenCalled();
+    });
+
+    it('should return null for an unknown email and still run bcrypt', async () => {
+      jest.spyOn(userService, 'findByEmail').mockResolvedValue(null);
+      mockBcrypt.compare.mockResolvedValue(false as never);
+
+      const result = await service.validateUser('nobody@gmail.com', 'password');
+
+      expect(result).toBeNull();
+      expect(bcrypt.compare).toHaveBeenCalledWith(
+        'password',
+        expect.anything(),
+      );
+    });
   });
 
   describe('login', () => {

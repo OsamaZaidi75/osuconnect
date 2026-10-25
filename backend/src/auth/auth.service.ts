@@ -104,13 +104,18 @@ export class AuthService {
     }
   }
 
+  /**
+   * `username` may be a username or an email. Usernames can't contain "@"
+   * (see CreateUserDto), so an identifier with one is always an email.
+   */
   async validateUser(
     username: string,
     pass: string,
   ): Promise<UserEntity | null> {
-    const user = await this.userService.findByUsername(
-      username.toLocaleLowerCase(),
-    );
+    const identifier = username.trim().toLocaleLowerCase();
+    const user = identifier.includes('@')
+      ? await this.userService.findByEmail(identifier)
+      : await this.userService.findByUsername(identifier);
     if (user) {
       if (await bcrypt.compare(pass, user.hashedPassword)) {
         return new UserEntity(user);
