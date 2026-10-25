@@ -98,8 +98,9 @@ const QuickInviteDialog: React.FC<QuickInviteDialogProps> = ({ open, onClose }) 
           ) : (
             <>
               <Typography
+                variant="h2"
                 data-testid="quick-invite-code"
-                sx={{ fontFamily: "monospace", fontSize: 56, fontWeight: 700, letterSpacing: "0.2em", pl: "0.2em" }}
+                sx={{ fontFamily: "monospace", fontWeight: 700, letterSpacing: "0.2em", pl: "0.2em" }}
               >
                 {code}
               </Typography>

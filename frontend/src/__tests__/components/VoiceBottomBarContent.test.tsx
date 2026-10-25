@@ -233,6 +233,9 @@ describe('VoiceBottomBarContent', () => {
     vi.mocked(useScreenShare).mockReturnValue({
       isScreenSharing: false,
       showSourcePicker: false,
+      showWebSettings: false,
+      handleWebSettingsStart: vi.fn(),
+      handleWebSettingsClose: vi.fn(),
       toggleScreenShare: vi.fn(),
       handleSourcePickerClose: vi.fn(),
       handleSourceSelect: vi.fn(),
@@ -622,6 +625,9 @@ describe('VoiceBottomBarContent', () => {
     vi.mocked(useScreenShare).mockReturnValue({
       isScreenSharing: false,
       showSourcePicker: false,
+      showWebSettings: false,
+      handleWebSettingsStart: vi.fn(),
+      handleWebSettingsClose: vi.fn(),
       toggleScreenShare: mockToggleScreenShare,
       handleSourcePickerClose: vi.fn(),
       handleSourceSelect: vi.fn(),
@@ -644,6 +650,9 @@ describe('VoiceBottomBarContent', () => {
     vi.mocked(useScreenShare).mockReturnValue({
       isScreenSharing: true,
       showSourcePicker: false,
+      showWebSettings: false,
+      handleWebSettingsStart: vi.fn(),
+      handleWebSettingsClose: vi.fn(),
       toggleScreenShare: vi.fn(),
       handleSourcePickerClose: vi.fn(),
       handleSourceSelect: vi.fn(),
@@ -691,6 +700,9 @@ describe('VoiceBottomBarContent', () => {
     vi.mocked(useScreenShare).mockReturnValue({
       isScreenSharing: false,
       showSourcePicker: false,
+      showWebSettings: false,
+      handleWebSettingsStart: vi.fn(),
+      handleWebSettingsClose: vi.fn(),
       toggleScreenShare: vi.fn(),
       handleSourcePickerClose: vi.fn(),
       handleSourceSelect: vi.fn(),
