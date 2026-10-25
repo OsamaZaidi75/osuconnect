@@ -1,0 +1,73 @@
+name: Build Oracle images
+
+# Builds the two OsuConnect images natively on ARM64 (the Oracle VM is
+# aarch64) and pushes them to GHCR, so the server only has to pull them
+# instead of compiling the app on 2 cores.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'shared/**'
+      - 'patches/**'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'package.json'
+      - '.github/workflows/build-oracle.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: build-oracle
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.image }}
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: backend
+            dockerfile: backend/Dockerfile.prod
+            build_args: ''
+          - image: frontend
+            dockerfile: frontend/Dockerfile.prod
+            build_args: |
+              VITE_API_URL=/api
+              VITE_WS_URL=
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: repo
+        run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ steps.repo.outputs.name }}-${{ matrix.image }}:oracle
+            ghcr.io/${{ steps.repo.outputs.name }}-${{ matrix.image }}:oracle-${{ github.sha }}
+          cache-from: type=gha,scope=oracle-${{ matrix.image }}
+          cache-to: type=gha,scope=oracle-${{ matrix.image }},mode=max,ignore-error=true
+          build-args: |
+            GITHUB_REPOSITORY=${{ github.repository }}
+            ${{ matrix.build_args }}

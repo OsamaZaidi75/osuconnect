@@ -28,6 +28,7 @@ services:
       - livekit
 
   backend:
+    image: ghcr.io/osamazaidi75/osuconnect-backend:${IMAGE_TAG:-oracle}
     build:
       context: ../..
       dockerfile: backend/Dockerfile.prod
@@ -59,6 +60,7 @@ services:
       retries: 3
 
   frontend:
+    image: ghcr.io/osamazaidi75/osuconnect-frontend:${IMAGE_TAG:-oracle}
     build:
       context: ../..
       dockerfile: frontend/Dockerfile.prod
