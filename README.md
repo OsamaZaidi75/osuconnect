@@ -1,5 +1,3 @@
-**🌐 Live:** [https://129-80-41-146.nip.io](https://129-80-41-146.nip.io)
-
 [![License: AGPL v3 + Commercial](https://img.shields.io/badge/license-AGPL%20v3%20%2F%20Commercial-blue)](LICENSE.md)
 [![Backend Coverage](https://raw.githubusercontent.com/semaphore-chat/semaphore-chat/badges/backend-coverage.svg)](https://github.com/semaphore-chat/semaphore-chat/actions/workflows/backend-tests.yml)
 [![Frontend Coverage](https://raw.githubusercontent.com/semaphore-chat/semaphore-chat/badges/frontend-coverage.svg)](https://github.com/semaphore-chat/semaphore-chat/actions/workflows/frontend-tests.yml)
@@ -8,6 +6,8 @@
 # OsuConnect
 
 *Your space. Your people. Your connection.*
+
+**🌐 Live:** [https://129-80-41-146.nip.io](https://129-80-41-146.nip.io)
 
 OsuConnect is a self-hosted, free, open-source communication platform that provides real-time messaging, voice and video calls, screen sharing with audio and replay capture, and community management out of the box. Run it in your browser or as an Electron desktop app on Windows and Linux, as well as on your phone as a PWA with push notification support.
 
