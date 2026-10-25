@@ -1,0 +1,363 @@
+import {
+  Injectable,
+  UnprocessableEntityException,
+  PayloadTooLargeException,
+  NotFoundException,
+  ForbiddenException,
+  Logger,
+} from '@nestjs/common';
+import { CreateFileUploadDto } from './dto/create-file-upload.dto';
+import { DatabaseService } from '@/database/database.service';
+import { FileType, ResourceType, StorageType } from '@prisma/client';
+import { createHash } from 'crypto';
+import { StorageService } from '@/storage/storage.service';
+import { StorageQuotaService } from '@/storage-quota/storage-quota.service';
+import { ThumbnailService } from '@/file/thumbnail.service';
+import { ResourceTypeFileValidator } from './validators';
+import { UserEntity } from '@/user/dto/user-response.dto';
+import { FileUploadResponseDto } from './dto/file-upload-response.dto';
+
+@Injectable()
+export class FileUploadService {
+  private readonly logger = new Logger(FileUploadService.name);
+
+  constructor(
+    private readonly databaseService: DatabaseService,
+    private readonly storageService: StorageService,
+    private readonly storageQuotaService: StorageQuotaService,
+    private readonly thumbnailService: ThumbnailService,
+  ) {}
+
+  async uploadFile(
+    file: Express.Multer.File,
+    createFileUploadDto: CreateFileUploadDto,
+    user: UserEntity,
+  ) {
+    // The active default storage type decides where this NEW upload lands.
+    // Existing records keep whatever storageType they were created with —
+    // resolved per-record everywhere else (serve, delete, backfill).
+    const storageType = this.storageService.getDefaultStorageType();
+    // For LOCAL, multer already wrote the final storage location at
+    // file.path — the object key IS that path (zero-copy, unchanged
+    // behavior). For S3, multer's write is just local staging; the object
+    // key is the bare multer-generated filename and the bytes get streamed
+    // up below before the DB record is created.
+    let objectKey = file.path;
+
+    try {
+      // Check storage quota before processing
+      const quotaCheck = await this.storageQuotaService.canUploadFile(
+        user.id,
+        file.size,
+      );
+
+      if (!quotaCheck.canUpload) {
+        // Delete file from disk before throwing error
+        await this.cleanupFile(file.path);
+        throw new PayloadTooLargeException(
+          quotaCheck.message || 'Storage quota exceeded',
+        );
+      }
+
+      // Validate file using strategy pattern
+      const validator = new ResourceTypeFileValidator({
+        resourceType: createFileUploadDto.resourceType,
+      });
+
+      const isValid = await validator.isValid(file);
+      if (!isValid) {
+        // Delete file from disk before throwing error
+        await this.cleanupFile(file.path);
+        throw new UnprocessableEntityException(
+          validator.buildErrorMessage(file),
+        );
+      }
+
+      // Generate checksum (streamed — never buffers the whole file)
+      const checksum = await this.generateChecksum(file.path);
+
+      // Determine file type from MIME type
+      const fileType = this.getFileTypeFromMimeType(file.mimetype);
+
+      // For S3, stream the staged tmp file up to the bucket now, before
+      // creating the DB record — a failed upload must never produce an
+      // orphan row. The local tmp file stays put: video thumbnailing (below)
+      // still needs a local path for ffmpeg, so it's cleaned up afterwards.
+      if (storageType === StorageType.S3) {
+        objectKey = file.filename;
+        try {
+          const provider = this.storageService.getProvider(StorageType.S3);
+          await provider.writeStream(
+            objectKey,
+            this.storageService.createReadStream(file.path),
+            { contentType: file.mimetype },
+          );
+        } catch (uploadError) {
+          await this.cleanupFile(file.path);
+          this.logger.error(`Failed to upload file to S3: ${uploadError}`);
+          throw uploadError;
+        }
+      }
+
+      // Create database record
+      try {
+        const { resourceId, ...dtoRest } = createFileUploadDto;
+        const fileRecord = await this.databaseService.file.create({
+          data: {
+            ...dtoRest,
+            ...this.mapResourceIdToTypedColumn(
+              dtoRest.resourceType,
+              resourceId,
+            ),
+            filename: this.sanitizeFilename(file.originalname),
+            mimeType: file.mimetype,
+            fileType,
+            size: file.size,
+            checksum,
+            uploadedById: user.id,
+            storageType,
+            storagePath: objectKey,
+          },
+        });
+
+        // Increment user's storage usage
+        await this.storageQuotaService.incrementUserStorage(user.id, file.size);
+
+        // Generate thumbnail for video files before responding, so the
+        // attachment metadata clients receive carries hasThumbnail: true.
+        // Failure is non-fatal — the upload succeeds without a thumbnail.
+        const finalRecord =
+          fileType === FileType.VIDEO
+            ? ((await this.generateThumbnail(
+                file.path,
+                fileRecord.id,
+                storageType,
+              )) ?? fileRecord)
+            : fileRecord;
+
+        // The local tmp copy is only scratch space for S3 uploads (ffmpeg
+        // thumbnailing needed it above) — safe to remove now. For LOCAL,
+        // file.path IS the permanent storage location and must never be
+        // deleted here.
+        if (storageType === StorageType.S3) {
+          await this.cleanupFile(file.path);
+        }
+
+        return new FileUploadResponseDto(finalRecord);
+      } catch (dbError) {
+        // If DB insert fails, clean up the local tmp file and, if the
+        // object was already uploaded to S3, the now-orphaned remote copy.
+        await this.cleanupFile(file.path);
+        if (storageType === StorageType.S3) {
+          await this.cleanupRemoteObject(objectKey);
+        }
+        this.logger.error(`Database error during file upload: ${dbError}`);
+        throw dbError;
+      }
+    } catch (error) {
+      // Ensure file is cleaned up on any error
+      if (
+        error instanceof UnprocessableEntityException ||
+        error instanceof PayloadTooLargeException
+      ) {
+        throw error; // Already cleaned up and has proper message
+      }
+
+      // For unexpected errors (not already handled), clean up and re-throw
+      this.logger.error(`Error processing file upload: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Generate a thumbnail for a video upload and persist its path.
+   * Errors are logged but never propagate to the upload response.
+   *
+   * @returns The updated file record, or null if generation failed
+   */
+  private async generateThumbnail(
+    filePath: string,
+    fileId: string,
+    storageType: StorageType,
+  ) {
+    try {
+      const thumbnailPath = await this.thumbnailService.generateVideoThumbnail(
+        filePath,
+        fileId,
+        storageType,
+      );
+      if (!thumbnailPath) {
+        return null;
+      }
+      return await this.databaseService.file.update({
+        where: { id: fileId },
+        data: { thumbnailPath },
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to generate thumbnail for file ${fileId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Best-effort cleanup of an S3 object orphaned by a failed DB insert
+   * (upload succeeded, but the record that would reference it never
+   * committed). Logged, never thrown — mirrors cleanupFile's non-fatal
+   * cleanup semantics.
+   */
+  private async cleanupRemoteObject(key: string): Promise<void> {
+    try {
+      const provider = this.storageService.getProvider(StorageType.S3);
+      await provider.deleteFile(key);
+      this.logger.debug(`Cleaned up orphaned S3 object: ${key}`);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to clean up orphaned S3 object ${key}: ${error}`,
+      );
+    }
+  }
+
+  /**
+   * Sanitize the client-supplied original filename before persisting it for
+   * display: strip path separators and control characters, and cap the
+   * length at 255 characters. The on-disk name is multer-generated and never
+   * derived from this value.
+   */
+  private sanitizeFilename(originalName: string): string {
+    const sanitized = (originalName ?? '')
+      .replace(/[/\\]/g, '_')
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\u0000-\u001f\u007f]/g, '')
+      .trim();
+
+    return (sanitized.length > 0 ? sanitized : 'file').slice(0, 255);
+  }
+
+  /**
+   * Delete the local tmp file staged by multer. Always local — this never
+   * needs per-record provider resolution (it runs before any DB record, or
+   * S3 upload, exists).
+   */
+  private async cleanupFile(filePath: string): Promise<void> {
+    try {
+      await this.storageService.deleteFile(filePath);
+      this.logger.debug(`Cleaned up file: ${filePath}`);
+    } catch (error) {
+      this.logger.warn(`Failed to clean up file ${filePath}: ${error}`);
+    }
+  }
+
+  /**
+   * Generate a SHA-256 checksum for a file by streaming it through the
+   * hash — never buffers the whole file into memory.
+   */
+  private async generateChecksum(filePath: string): Promise<string> {
+    const hash = createHash('sha256');
+    const stream = this.storageService.createReadStream(filePath);
+    for await (const chunk of stream) {
+      hash.update(chunk as Buffer);
+    }
+    return hash.digest('hex');
+  }
+
+  /**
+   * Determine FileType enum from MIME type
+   */
+  private getFileTypeFromMimeType(mimeType: string): FileType {
+    if (mimeType.startsWith('image/')) {
+      return FileType.IMAGE;
+    }
+    if (mimeType.startsWith('video/')) {
+      return FileType.VIDEO;
+    }
+    if (mimeType.startsWith('audio/')) {
+      return FileType.AUDIO;
+    }
+    if (
+      mimeType.startsWith('application/pdf') ||
+      mimeType.startsWith('application/msword') ||
+      mimeType.startsWith(
+        'application/vnd.openxmlformats-officedocument.wordprocessingml',
+      ) ||
+      mimeType.startsWith('application/vnd.ms-excel') ||
+      mimeType.startsWith(
+        'application/vnd.openxmlformats-officedocument.spreadsheetml',
+      ) ||
+      mimeType.startsWith('application/vnd.ms-powerpoint') ||
+      mimeType.startsWith(
+        'application/vnd.openxmlformats-officedocument.presentationml',
+      ) ||
+      mimeType.startsWith('text/')
+    ) {
+      return FileType.DOCUMENT;
+    }
+    // Archives and other application types
+    if (
+      mimeType.includes('zip') ||
+      mimeType.includes('rar') ||
+      mimeType.includes('7z') ||
+      mimeType.includes('tar') ||
+      mimeType.includes('gzip') ||
+      mimeType.includes('bzip') ||
+      mimeType === 'application/octet-stream'
+    ) {
+      return FileType.OTHER;
+    }
+    return FileType.OTHER;
+  }
+
+  /**
+   * Map a resourceId to the correct typed FK column based on resourceType.
+   */
+  private mapResourceIdToTypedColumn(
+    resourceType: ResourceType,
+    resourceId?: string | null,
+  ): { fileUserId?: string; fileCommunityId?: string; fileMessageId?: string } {
+    if (!resourceId) return {};
+    switch (resourceType) {
+      case ResourceType.USER_AVATAR:
+      case ResourceType.USER_BANNER:
+      case ResourceType.REPLAY_CLIP:
+        return { fileUserId: resourceId };
+      case ResourceType.COMMUNITY_AVATAR:
+      case ResourceType.COMMUNITY_BANNER:
+      case ResourceType.CUSTOM_EMOJI:
+      case ResourceType.SOUNDBOARD_SOUND:
+        return { fileCommunityId: resourceId };
+      case ResourceType.MESSAGE_ATTACHMENT:
+        return { fileMessageId: resourceId };
+    }
+  }
+
+  async remove(id: string, userId: string) {
+    const file = await this.databaseService.file.findUnique({
+      where: { id },
+      select: { uploadedById: true, size: true, deletedAt: true },
+    });
+
+    if (!file) {
+      throw new NotFoundException('File not found');
+    }
+
+    if (file.uploadedById !== userId) {
+      throw new ForbiddenException('You can only delete your own files');
+    }
+
+    if (file.deletedAt) {
+      throw new NotFoundException('File not found');
+    }
+
+    const result = await this.databaseService.file.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
+
+    if (file.size) {
+      await this.storageQuotaService.decrementUserStorage(userId, file.size);
+    }
+
+    return new FileUploadResponseDto(result);
+  }
+}

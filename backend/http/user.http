@@ -1,0 +1,64 @@
+### Register a new user
+# @name register
+POST http://localhost:3000/api/users
+Content-Type: application/json
+
+{
+  "username": "adminuser",
+  "password": "supersecurepw123",
+  "email": "admin@example.com"
+}
+
+###
+# @name login
+POST http://localhost:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "admin"
+}
+
+###
+# @name refresh
+POST http://localhost:3000/api/auth/refresh
+
+###
+
+@jwt = {{login.response.body.accessToken}}
+@jwt = {{refresh.response.body.accessToken}}
+
+###
+GET http://localhost:3000/api/users/profile
+Authorization: Bearer {{jwt}}
+###
+
+POST http://localhost:3000/api/auth/logout
+Content-Type: application/json
+Authorization: Bearer {{jwt}}
+
+###
+
+### Register another user (normal)
+POST http://localhost:3000/api/users
+Content-Type: application/json
+
+{
+  "username": "normaluser",
+  "password": "regularpw456",
+  "email": "user@example.com"
+}
+
+###
+
+GET http://localhost:3000/api/users/username/admin
+Authorization: Bearer {{jwt}}
+
+###
+@userId = {{register.response.body.id}}
+
+### 
+GET http://localhost:3000/api/users/{{userId}}
+Authorization: Bearer {{jwt}}
+
+###

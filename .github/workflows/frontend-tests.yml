@@ -1,0 +1,296 @@
+name: Frontend Tests
+
+# PRs to main always start this workflow, even when no frontend file changed,
+# so its jobs always report a check and can be required checks in the main
+# ruleset. A workflow-level `paths` filter would skip the whole workflow, and a
+# required check that is never reported blocks the PR forever. The `changes`
+# job applies the path filter instead: when it reports no frontend changes the
+# other jobs are skipped, and GitHub counts a skipped job as passing. Pushes
+# to main keep the workflow-level filter; required checks only apply to PRs.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - 'shared/**'
+      - 'patches/**'
+      - '.github/workflows/frontend-tests.yml'
+
+# A newer push to a PR cancels that PR's in-flight run. Each push to main gets
+# its own group (run_id), so no main commit is cancelled or left pending: all
+# of them are tested and badged.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # PRs only. On pushes it is skipped, its output is empty, and every job below
+  # runs. Keep the filter in sync with the push `paths` above.
+  changes:
+    name: Detect frontend changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      # Lists the PR's files through the API, so no checkout is needed.
+      - name: Filter frontend paths
+        uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            frontend:
+              - 'frontend/**'
+              - 'shared/**'
+              - 'patches/**'
+              - '.github/workflows/frontend-tests.yml'
+
+  # The jobs below skip only when `changes` positively reported no frontend
+  # changes (output 'false'). If `changes` was skipped (a push) or failed, the
+  # output is empty and they run: a broken filter runs the tests rather than
+  # skipping them, which would count as passing. `!cancelled()` lets them start
+  # after a skipped or failed `changes`.
+  checks:
+    name: Frontend Lint, Type Check & Build
+    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.frontend != 'false' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate API client
+        working-directory: ./frontend
+        run: pnpm exec openapi-ts
+
+      - name: Run ESLint
+        working-directory: ./frontend
+        run: pnpm run lint
+
+      - name: Playwright images match @playwright/test
+        run: scripts/check-playwright-images.sh
+
+      - name: Type check with TypeScript
+        working-directory: ./frontend
+        # Bare `tsc --noEmit` against the solution-style root tsconfig checks
+        # nothing (#356) — `type-check` runs reference-aware `tsc -b`
+        run: pnpm run type-check
+
+      - name: Build frontend
+        working-directory: ./frontend
+        run: pnpm run build
+
+      - name: Check bundle budget (PR-11)
+        working-directory: ./frontend
+        run: pnpm run check:bundle-budget
+
+  test:
+    name: Frontend Unit Tests (shard ${{ matrix.shard }}/${{ strategy.job-total }})
+    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.frontend != 'false' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate API client
+        working-directory: ./frontend
+        run: pnpm exec openapi-ts
+
+      # Vitest splits the test files across the shards. Each shard writes a
+      # blob report, which the `Frontend Unit Tests` job merges into one pass/fail
+      # summary. It also writes its raw coverage-final.json, which
+      # scripts/merge-coverage-shards.mjs merges (that file explains why
+      # `vitest --merge-reports --coverage` is not used). Passing --reporter
+      # replaces the reporters Vitest picks by itself in CI, so `default` and
+      # `github-actions` are listed explicitly.
+      - name: Run unit tests with coverage
+        working-directory: ./frontend
+        run: >-
+          pnpm exec vitest run
+          --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+          --reporter=default --reporter=github-actions --reporter=blob
+          --outputFile.blob=vitest-shards/blobs/blob-${{ matrix.shard }}.json
+          --coverage --coverage.reporter=json
+          --coverage.reportsDirectory=vitest-shards/coverage/shard-${{ matrix.shard }}
+
+      # Kept for 7 days (about 2 MB each) so that "Re-run failed jobs" on one
+      # shard can still merge with the other shards' results from the first
+      # attempt.
+      - name: Upload shard results
+        uses: actions/upload-artifact@v7
+        with:
+          name: vitest-shard-${{ matrix.shard }}
+          path: frontend/vitest-shards/
+          if-no-files-found: error
+          retention-days: 7
+
+  # The one check to require for the unit tests, rather than each shard's. It
+  # fails unless every shard passed, and prints the merged Vitest summary and
+  # coverage table. On main it hands coverage-summary.json to the `badge` job.
+  coverage:
+    name: Frontend Unit Tests
+    runs-on: ubuntu-latest
+    needs: [changes, test]
+    if: ${{ !cancelled() && needs.changes.outputs.frontend != 'false' }}
+
+    steps:
+      - name: Check shard results
+        if: needs.test.result != 'success'
+        run: |
+          echo "::error::Not every unit test shard passed (result: ${{ needs.test.result }}). See the 'Frontend Unit Tests (shard k/n)' jobs."
+          exit 1
+
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download shard results
+        uses: actions/download-artifact@v8
+        with:
+          pattern: vitest-shard-*
+          path: frontend/vitest-shards
+          merge-multiple: true
+
+      # Every shard job passing does not guarantee every shard's results are
+      # here: after "Re-run failed jobs", the shards that passed the first time
+      # are not re-run, and their artifacts may have expired. Merging fewer
+      # shards would pass with fewer tests and report wrong coverage (and push
+      # a wrong badge on main), so fail instead. EXPECTED_SHARDS is the number
+      # of entries in the `test` job's matrix.
+      - name: Check all shard results are present
+        working-directory: ./frontend
+        env:
+          EXPECTED_SHARDS: 3
+        run: |
+          shopt -s nullglob
+          blobs=(vitest-shards/blobs/blob-*.json)
+          coverage=(vitest-shards/coverage/shard-*/coverage-final.json)
+          echo "Blob reports: ${#blobs[@]}, coverage files: ${#coverage[@]} (expected $EXPECTED_SHARDS of each)"
+          if [ "${#blobs[@]}" -ne "$EXPECTED_SHARDS" ] || [ "${#coverage[@]}" -ne "$EXPECTED_SHARDS" ]; then
+            echo "::error::Expected results from $EXPECTED_SHARDS shards, got ${#blobs[@]} blob reports and ${#coverage[@]} coverage files. Re-run all jobs."
+            exit 1
+          fi
+
+      # Replays the shards' results as one run. It prints the combined
+      # "Test Files / Tests" summary and fails if any test failed.
+      - name: Merge test reports
+        working-directory: ./frontend
+        run: pnpm exec vitest run --merge-reports=vitest-shards/blobs --reporter=default
+
+      # Prints the coverage table and writes coverage/coverage-summary.json,
+      # both identical to what an unsharded `pnpm run test:cov` produces.
+      - name: Merge coverage
+        working-directory: ./frontend
+        run: node scripts/merge-coverage-shards.mjs vitest-shards/coverage/*/coverage-final.json
+
+      - name: Upload coverage summary for the badge
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-coverage-summary
+          path: frontend/coverage/coverage-summary.json
+          if-no-files-found: error
+          retention-days: 1
+
+  # Pushes the coverage badge on main. Like the single job before sharding, it
+  # waits for the tests and for lint, type check, build and the bundle budget,
+  # so a failure in any of them leaves the badge unchanged. It is the only job
+  # with a write token, and it never runs on PRs.
+  badge:
+    name: Coverage Badge
+    runs-on: ubuntu-latest
+    needs: [coverage, checks]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Download coverage summary
+        uses: actions/download-artifact@v8
+        with:
+          name: frontend-coverage-summary
+          path: ${{ runner.temp }}/coverage
+
+      - name: Generate coverage badge
+        run: |
+          COVERAGE=$(jq '.total.lines.pct' "$RUNNER_TEMP/coverage/coverage-summary.json")
+          if (( $(echo "$COVERAGE < 50" | bc -l) )); then COLOR=red
+          elif (( $(echo "$COVERAGE < 70" | bc -l) )); then COLOR=yellow
+          elif (( $(echo "$COVERAGE < 80" | bc -l) )); then COLOR=orange
+          elif (( $(echo "$COVERAGE < 90" | bc -l) )); then COLOR=green
+          else COLOR=brightgreen; fi
+          curl -sf "https://img.shields.io/badge/coverage-${COVERAGE}%25-${COLOR}" > /tmp/frontend-coverage.svg
+
+      - name: Push badge to badges branch
+        continue-on-error: true
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code origin badges &>/dev/null; then
+            git fetch origin badges:badges
+            git checkout badges
+          else
+            git checkout --orphan badges
+            git rm -rf . 2>/dev/null || true
+          fi
+          cp /tmp/frontend-coverage.svg frontend-coverage.svg
+          git checkout badges -- backend-coverage.svg 2>/dev/null || true
+          git add frontend-coverage.svg
+          git add backend-coverage.svg 2>/dev/null || true
+          git commit -m "Update frontend coverage badge" --allow-empty || true
+          git push origin badges

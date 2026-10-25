@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["src/*"],
+      "@semaphore-chat/shared": ["../shared/src"],
+      "@semaphore-chat/shared/*": ["../shared/src/*"]
+    }
+  }
+}

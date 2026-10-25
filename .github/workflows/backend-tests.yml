@@ -1,0 +1,394 @@
+name: Backend Tests
+
+# PRs to main always start this workflow, even when no backend file changed,
+# so its jobs always report a check and can be required checks in the main
+# ruleset. A workflow-level `paths` filter would skip the whole workflow, and a
+# required check that is never reported blocks the PR forever. The `changes`
+# job applies the path filter instead: when it reports no backend changes the
+# other jobs are skipped, and GitHub counts a skipped job as passing. Pushes
+# to main keep the workflow-level filter; required checks only apply to PRs.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'shared/**'
+      - '.github/workflows/backend-tests.yml'
+
+# PRs: a newer push cancels the superseded run. Pushes to main get a unique
+# group (run_id), so they are never cancelled, queued or replaced — every main
+# commit still gets its own run and coverage badge update, as before.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # PRs only. On pushes it is skipped, its output is empty, and every job below
+  # runs. Keep the filter in sync with the push `paths` above.
+  changes:
+    name: Detect backend changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+    steps:
+      # Lists the PR's files through the API, so no checkout is needed.
+      - name: Filter backend paths
+        uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'shared/**'
+              - '.github/workflows/backend-tests.yml'
+
+  # The jobs below skip only when `changes` positively reported no backend
+  # changes (output 'false'). If `changes` was skipped (a push) or failed, the
+  # output is empty and they run: a broken filter runs the tests rather than
+  # skipping them, which would count as passing. `!cancelled()` lets them start
+  # after a skipped or failed `changes`.
+
+  # ESLint and tsc share one job so the install + prisma generate happens once
+  # (they were separate jobs doing identical setup). Neither is on the critical
+  # path — Unit Tests / E2E Tests take ~2x longer.
+  lint:
+    name: Backend Lint & Type Check
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client
+        id: prisma
+        working-directory: ./backend
+        run: pnpm run prisma:generate
+
+      # Type check runs BEFORE ESLint: `pnpm run lint` is `eslint --fix`, which
+      # rewrites files in place, so tsc must see the untouched checkout (as it
+      # did in its own job) — e.g. a prettier reflow could otherwise move which
+      # line a `// @ts-expect-error` applies to.
+      - name: Type check
+        working-directory: ./backend
+        run: pnpm run type-check
+
+      # Still runs when tsc fails, so one run reports both kinds of errors
+      # (as the separate jobs did) — but not if setup itself failed.
+      - name: Run ESLint
+        if: ${{ !cancelled() && steps.prisma.outcome == 'success' }}
+        working-directory: ./backend
+        run: pnpm run lint
+
+  test:
+    name: Backend Unit Tests
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: semaphore
+          POSTGRES_PASSWORD: semaphore
+          POSTGRES_DB: test
+        options: >-
+          --health-cmd "pg_isready -U semaphore"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client
+        working-directory: ./backend
+        run: pnpm run prisma:generate
+
+      - name: Run unit tests with coverage
+        working-directory: ./backend
+        run: pnpm run test:cov
+        env:
+          DATABASE_URL: postgresql://semaphore:semaphore@localhost:5432/test
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          JWT_SECRET: test-secret-key
+          JWT_REFRESH_SECRET: test-refresh-secret-key
+
+      - name: Check coverage thresholds
+        if: always()
+        working-directory: ./backend
+        run: |
+          if [ -f coverage/coverage-summary.json ]; then
+            echo "Coverage summary:"
+            cat coverage/coverage-summary.json
+          fi
+
+      - name: Generate coverage badge
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        working-directory: ./backend
+        run: |
+          COVERAGE=$(jq '.total.lines.pct' coverage/coverage-summary.json)
+          if (( $(echo "$COVERAGE < 50" | bc -l) )); then COLOR=red
+          elif (( $(echo "$COVERAGE < 70" | bc -l) )); then COLOR=yellow
+          elif (( $(echo "$COVERAGE < 80" | bc -l) )); then COLOR=orange
+          elif (( $(echo "$COVERAGE < 90" | bc -l) )); then COLOR=green
+          else COLOR=brightgreen; fi
+          curl -sf "https://img.shields.io/badge/coverage-${COVERAGE}%25-${COLOR}" > /tmp/backend-coverage.svg
+
+      - name: Push badge to badges branch
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        continue-on-error: true
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code origin badges &>/dev/null; then
+            git fetch origin badges:badges
+            git checkout badges
+          else
+            git checkout --orphan badges
+            git rm -rf . 2>/dev/null || true
+          fi
+          cp /tmp/backend-coverage.svg backend-coverage.svg
+          git checkout badges -- frontend-coverage.svg 2>/dev/null || true
+          git add backend-coverage.svg
+          git add frontend-coverage.svg 2>/dev/null || true
+          git commit -m "Update backend coverage badge" --allow-empty || true
+          git push origin badges
+
+  e2e:
+    name: Backend E2E Tests
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
+    runs-on: ubuntu-latest
+
+    env:
+      # Static ffmpeg for storage-s3.e2e-spec.ts, see "Restore static ffmpeg".
+      # Bumping the release requires updating both SHA-256s. GitHub shows each
+      # release asset's digest, but these are of the *uncompressed* binaries,
+      # not of the .gz assets.
+      FFMPEG_STATIC_RELEASE: b6.1.1
+      FFMPEG_SHA256: e7e7fb30477f717e6f55f9180a70386c62677ef8a4d4d1a5d948f4098aa3eb99
+      FFPROBE_SHA256: 4f231a1960d83e403d08f7971e271707bec278a9ae18e21b8b5b03186668450d
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: semaphore
+          POSTGRES_PASSWORD: semaphore
+          POSTGRES_DB: test
+        options: >-
+          --health-cmd "pg_isready -U semaphore"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+      # S3-compatible object storage for storage-s3.e2e-spec.ts. GitHub
+      # Actions service containers cannot override a container's CMD/args
+      # (only `options` flags are supported, appended to `docker create`),
+      # so the image's default CMD must start a server by itself. The
+      # upstream `minio/minio` Docker Hub repo (incl. the `edge-cicd` tag
+      # used previously) is gone, and `quay.io/minio/minio` release tags
+      # default to `minio` with no subcommand (prints --help and exits).
+      # RustFS's entrypoint runs `rustfs server /data` (RUSTFS_VOLUMES) with
+      # env-only config and ships curl for the healthcheck; the same
+      # tag+digest is used in docker-compose.yml and scripts/test-stack.sh.
+      # The spec creates its own bucket via the SDK in beforeAll.
+      s3:
+        image: rustfs/rustfs:1.0.0@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff
+        env:
+          RUSTFS_ACCESS_KEY: minioadmin
+          RUSTFS_SECRET_KEY: minioadmin
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/health"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 9000:9000
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client
+        working-directory: ./backend
+        run: pnpm run prisma:generate
+
+      - name: Run migrations
+        working-directory: ./backend
+        run: pnpm run prisma:migrate
+        env:
+          DATABASE_URL: postgresql://semaphore:semaphore@localhost:5432/test
+
+      # storage-s3.e2e-spec.ts's video-thumbnail leg shells out to the
+      # runner's system ffmpeg (fluent-ffmpeg, no bundled binary). Thumbnail
+      # failures are non-fatal to uploads, so without this check a missing
+      # ffmpeg surfaces as a confusing hasThumbnail assertion failure.
+      #
+      # ubuntu-latest does NOT ship ffmpeg preinstalled (confirmed via a CI
+      # run where the old verify step's `ffmpeg -version | head -1` printed
+      # "ffmpeg: command not found" yet the step still reported success —
+      # `bash -e` without `pipefail`, GitHub Actions' default shell mode,
+      # only checks the exit code of the *last* command in a pipe, i.e.
+      # `head`, which exits 0 even on empty input). Install it explicitly
+      # rather than assuming the runner image provides it.
+      #
+      # `apt-get install ffmpeg` cost ~28 s per run, so instead use a pinned,
+      # checksum-verified static build, cached by release. eugeneware/
+      # ffmpeg-static release b6.1.1 hosts johnvansickle.com's fully static
+      # linux-x64 FFmpeg 7.0.2 (the tag names the npm package line, not the
+      # FFmpeg version). It has everything the thumbnail path uses (native
+      # H.264 decoder, scale filter, mjpeg encoder, image2 muxer) plus the same
+      # external codec libs as Ubuntu's build (libx264/x265/vpx/aom/dav1d/...).
+      # For reference: apt on ubuntu-24.04 gave 6.1.1; the production backend
+      # image (node:24-alpine) ships Alpine's ffmpeg 8.x.
+      #
+      # The pinned assets and SHA-256s are linux-x64 only, so the cache key
+      # names that platform literally and this guard fails fast (before a
+      # restore could hand x64 binaries to another arch) if runs-on changes.
+      - name: Check runner is linux-x64
+        run: |
+          if [ "${RUNNER_OS}-${RUNNER_ARCH}" != "Linux-X64" ]; then
+            echo "::error::Static ffmpeg pin is linux-x64 only (runner is ${RUNNER_OS}-${RUNNER_ARCH})"
+            exit 1
+          fi
+
+      - name: Restore static ffmpeg from cache
+        id: ffmpeg-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ffmpeg-static
+          key: ffmpeg-static-linux-x64-${{ env.FFMPEG_STATIC_RELEASE }}
+
+      - name: Download static ffmpeg
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          dir="$HOME/.cache/ffmpeg-static"
+          base="https://github.com/eugeneware/ffmpeg-static/releases/download/${FFMPEG_STATIC_RELEASE}"
+          mkdir -p "$dir"
+          for bin in ffmpeg ffprobe; do
+            curl -fsSL --retry 3 -o "$dir/$bin.gz" "$base/$bin-linux-x64.gz"
+            gunzip -f "$dir/$bin.gz"
+          done
+
+      # Checksums are verified on every run, cache hit or not (a failed check
+      # also keeps a bad download out of the cache: actions/cache only saves
+      # on job success). Only the two verified binaries are copied into a
+      # fresh directory that goes on PATH — never the restored cache dir
+      # itself, so nothing else in it can shadow a command in later steps.
+      - name: Verify and install static ffmpeg
+        run: |
+          set -euo pipefail
+          src="$HOME/.cache/ffmpeg-static"
+          bin="$RUNNER_TEMP/ffmpeg-static-bin"
+          rm -rf "$bin"
+          mkdir -p "$bin"
+          cp "$src/ffmpeg" "$src/ffprobe" "$bin/"
+          echo "${FFMPEG_SHA256}  $bin/ffmpeg" | sha256sum -c -
+          echo "${FFPROBE_SHA256}  $bin/ffprobe" | sha256sum -c -
+          chmod 0755 "$bin/ffmpeg" "$bin/ffprobe"
+          echo "$bin" >> "$GITHUB_PATH"
+
+      # Hard-fail (via pipefail) if ffmpeg is somehow still missing after the
+      # install step above, instead of silently continuing like the old
+      # unguarded pipe did.
+      - name: Verify ffmpeg is available
+        run: |
+          set -euo pipefail
+          command -v ffmpeg
+          ffmpeg -version | head -1
+
+      - name: Run E2E tests
+        working-directory: ./backend
+        run: pnpm run test:e2e
+        env:
+          DATABASE_URL: postgresql://semaphore:semaphore@localhost:5432/test
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          JWT_SECRET: test-secret-key
+          JWT_REFRESH_SECRET: test-refresh-secret-key
+          NODE_ENV: test
+          # storage-s3.e2e-spec.ts only: points the suite at the `s3`
+          # service above instead of its compose-network default
+          # (http://s3:9000, unreachable by hostname from a
+          # non-containerized GHA job — services are only reachable via
+          # localhost:<port>).
+          S3_TEST_ENDPOINT: http://localhost:9000
+          S3_TEST_BUCKET: semaphore-dev

@@ -1,0 +1,345 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { screen, waitFor, act } from '@testing-library/react';
+import { http, HttpResponse } from 'msw';
+import { server } from '../msw/server';
+import { renderWithProviders } from '../test-utils';
+import MemberListContainer from '../../components/Message/MemberListContainer';
+import { VoiceSessionType } from '../../contexts/VoiceContext';
+import { handleUserOnline } from '../../socket-hub/handlers/presenceHandlers';
+import type { MemberData } from '../../components/Message/MemberList';
+
+vi.mock('../../api-client/client.gen', async (importOriginal) => {
+  const { createClient, createConfig } = await import('../../api-client/client');
+  return {
+    ...(await importOriginal<Record<string, unknown>>()),
+    client: createClient(createConfig({ baseUrl: 'http://localhost:3000' })),
+  };
+});
+
+const BASE_URL = 'http://localhost:3000';
+
+interface CapturedMemberListProps {
+  members: MemberData[];
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
+  onLoadMore?: () => void;
+}
+
+let capturedPropsHistory: CapturedMemberListProps[] = [];
+vi.mock('../../components/Message/MemberList', () => ({
+  default: (props: CapturedMemberListProps) => {
+    capturedPropsHistory.push(props);
+    return <div data-testid="member-list-mock">{props.members.length}</div>;
+  },
+}));
+
+function membershipFixture(
+  suffix: string,
+  username: string,
+  displayName: string,
+) {
+  return {
+    id: `membership-${suffix}`,
+    userId: `user-${suffix}`,
+    communityId: 'community-1',
+    joinedAt: '2025-01-01T00:00:00Z',
+    roles: [],
+    user: {
+      id: `user-${suffix}`,
+      username,
+      displayName,
+      avatarUrl: null,
+      status: null,
+    },
+  };
+}
+
+describe('MemberListContainer identity-preserving merge', () => {
+  beforeEach(() => {
+    capturedPropsHistory = [];
+  });
+
+  it('reuses the previous member object for members unaffected by a presence event, and creates a new one for the affected member', async () => {
+    server.use(
+      http.get(`${BASE_URL}/api/membership/community/community-1`, () =>
+        HttpResponse.json({
+          members: [
+            membershipFixture('a', 'alice', 'Alice'),
+            membershipFixture('b', 'bob', 'Bob'),
+          ],
+          continuationToken: undefined,
+        }),
+      ),
+      http.get(`${BASE_URL}/api/presence/users/:userIds`, () =>
+        HttpResponse.json({ presence: { 'user-a': false, 'user-b': false } }),
+      ),
+    );
+
+    const { queryClient } = renderWithProviders(
+      <MemberListContainer
+        contextType={VoiceSessionType.Channel}
+        contextId="channel-1"
+        communityId="community-1"
+        isPrivate={false}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('member-list-mock')).toHaveTextContent('2');
+    });
+
+    const beforeMembers = capturedPropsHistory[capturedPropsHistory.length - 1].members;
+    const memberABefore = beforeMembers.find((m) => m.id === 'user-a')!;
+    const memberBBefore = beforeMembers.find((m) => m.id === 'user-b')!;
+    expect(memberABefore.isOnline).toBe(false);
+    expect(memberBBefore.isOnline).toBe(false);
+
+    // Same surgical patch path socket-hub uses in production: setQueryData,
+    // not invalidate/refetch.
+    act(() => {
+      handleUserOnline({ userId: 'user-a' }, queryClient);
+    });
+
+    await waitFor(() => {
+      const latest = capturedPropsHistory[capturedPropsHistory.length - 1].members;
+      const latestA = latest.find((m) => m.id === 'user-a')!;
+      expect(latestA.isOnline).toBe(true);
+    });
+
+    const afterMembers = capturedPropsHistory[capturedPropsHistory.length - 1].members;
+    const memberAAfter = afterMembers.find((m) => m.id === 'user-a')!;
+    const memberBAfter = afterMembers.find((m) => m.id === 'user-b')!;
+
+    // The updated member gets a fresh object identity...
+    expect(memberAAfter).not.toBe(memberABefore);
+    // ...but the unaffected member keeps the exact same object reference,
+    // so React.memo(MemberRow) can bail out of re-rendering it.
+    expect(memberBAfter).toBe(memberBBefore);
+    expect(memberBAfter.isOnline).toBe(false);
+  });
+});
+
+describe('MemberListContainer paginated community members', () => {
+  beforeEach(() => {
+    capturedPropsHistory = [];
+  });
+
+  it('loads the first page, exposes hasMore, and appends the next page on load-more while preserving member identity', async () => {
+    server.use(
+      http.get(
+        `${BASE_URL}/api/membership/community/community-1`,
+        ({ request }) => {
+          const url = new URL(request.url);
+          const token = url.searchParams.get('continuationToken');
+          if (!token) {
+            // Page 1: full page with a continuation token
+            return HttpResponse.json({
+              members: [
+                membershipFixture('a', 'alice', 'Alice'),
+                membershipFixture('b', 'bob', 'Bob'),
+              ],
+              continuationToken: 'membership-b',
+            });
+          }
+          // Page 2: final partial page, no token
+          return HttpResponse.json({
+            members: [membershipFixture('c', 'carol', 'Carol')],
+            continuationToken: undefined,
+          });
+        },
+      ),
+      http.get(`${BASE_URL}/api/presence/users/:userIds`, () =>
+        HttpResponse.json({
+          presence: { 'user-a': false, 'user-b': false, 'user-c': false },
+        }),
+      ),
+    );
+
+    renderWithProviders(
+      <MemberListContainer
+        contextType={VoiceSessionType.Channel}
+        contextId="channel-1"
+        communityId="community-1"
+        isPrivate={false}
+      />,
+    );
+
+    // Page 1 renders with a load-more affordance
+    await waitFor(() => {
+      expect(screen.getByTestId('member-list-mock')).toHaveTextContent('2');
+    });
+    const page1Props = capturedPropsHistory[capturedPropsHistory.length - 1];
+    expect(page1Props.hasMore).toBe(true);
+    expect(page1Props.onLoadMore).toBeTypeOf('function');
+
+    const memberABefore = page1Props.members.find((m) => m.id === 'user-a')!;
+
+    // Trigger load-more (what the Show more button does in MemberList)
+    act(() => {
+      page1Props.onLoadMore!();
+    });
+
+    // Both pages flattened; no more pages left
+    await waitFor(() => {
+      expect(screen.getByTestId('member-list-mock')).toHaveTextContent('3');
+    });
+    const page2Props = capturedPropsHistory[capturedPropsHistory.length - 1];
+    expect(page2Props.hasMore).toBe(false);
+    expect(page2Props.members.map((m) => m.id)).toEqual([
+      'user-a',
+      'user-b',
+      'user-c',
+    ]);
+
+    // Identity-preserving merge still holds across page appends: the
+    // unaffected page-1 member keeps its object reference.
+    const memberAAfter = page2Props.members.find((m) => m.id === 'user-a')!;
+    expect(memberAAfter).toBe(memberABefore);
+  });
+
+  it('does not evict earlier pages after loading a third page (regression guard for useInfiniteQuery maxPages eviction)', async () => {
+    // Regression guard: TanStack v5's `maxPages` is a sliding-window CACHE
+    // bound, not a render limit — fetching page N+1 would silently evict
+    // page 1 from the cache, dropping already-rendered members from the
+    // flatMap'd list. MemberListContainer must not set `maxPages` at all.
+    // If it's ever reintroduced (e.g. `maxPages: 2`), this 3-page fixture
+    // will fail because page 1's member would disappear once page 3 loads.
+    server.use(
+      http.get(
+        `${BASE_URL}/api/membership/community/community-3`,
+        ({ request }) => {
+          const url = new URL(request.url);
+          const token = url.searchParams.get('continuationToken');
+          if (!token) {
+            return HttpResponse.json({
+              members: [membershipFixture('d', 'dave', 'Dave')],
+              continuationToken: 'membership-d',
+            });
+          }
+          if (token === 'membership-d') {
+            return HttpResponse.json({
+              members: [membershipFixture('e', 'erin', 'Erin')],
+              continuationToken: 'membership-e',
+            });
+          }
+          return HttpResponse.json({
+            members: [membershipFixture('f', 'frank', 'Frank')],
+            continuationToken: undefined,
+          });
+        },
+      ),
+      http.get(`${BASE_URL}/api/presence/users/:userIds`, () =>
+        HttpResponse.json({
+          presence: { 'user-d': false, 'user-e': false, 'user-f': false },
+        }),
+      ),
+    );
+
+    renderWithProviders(
+      <MemberListContainer
+        contextType={VoiceSessionType.Channel}
+        contextId="channel-3"
+        communityId="community-3"
+        isPrivate={false}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('member-list-mock')).toHaveTextContent('1');
+    });
+
+    // Load page 2.
+    act(() => {
+      capturedPropsHistory[capturedPropsHistory.length - 1].onLoadMore!();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('member-list-mock')).toHaveTextContent('2');
+    });
+
+    // Load page 3 — with maxPages eviction, page 1's member ('dave') would
+    // be dropped from the cache here, leaving only 2 members rendered.
+    act(() => {
+      capturedPropsHistory[capturedPropsHistory.length - 1].onLoadMore!();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('member-list-mock')).toHaveTextContent('3');
+    });
+
+    const finalProps = capturedPropsHistory[capturedPropsHistory.length - 1];
+    expect(finalProps.hasMore).toBe(false);
+    expect(finalProps.members.map((m) => m.id)).toEqual([
+      'user-d',
+      'user-e',
+      'user-f',
+    ]);
+  });
+});
+
+describe('MemberListContainer version-skew tolerance (pre-0.4.0 backends)', () => {
+  beforeEach(() => {
+    capturedPropsHistory = [];
+  });
+
+  it('renders members when the server returns a legacy plain array instead of the { members, continuationToken } envelope', async () => {
+    server.use(
+      http.get(`${BASE_URL}/api/membership/community/community-legacy`, () =>
+        // Pre-0.4.0 backends respond with a bare array of memberships
+        // instead of the cursor envelope a v0.4.0+ client expects.
+        HttpResponse.json([
+          membershipFixture('a', 'alice', 'Alice'),
+          membershipFixture('b', 'bob', 'Bob'),
+        ]),
+      ),
+      http.get(`${BASE_URL}/api/presence/users/:userIds`, () =>
+        HttpResponse.json({ presence: { 'user-a': false, 'user-b': false } }),
+      ),
+    );
+
+    renderWithProviders(
+      <MemberListContainer
+        contextType={VoiceSessionType.Channel}
+        contextId="channel-legacy"
+        communityId="community-legacy"
+        isPrivate={false}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('member-list-mock')).toHaveTextContent('2');
+    });
+
+    const props = capturedPropsHistory[capturedPropsHistory.length - 1];
+    expect(props.members.map((m) => m.id)).toEqual(['user-a', 'user-b']);
+    // No continuationToken on the legacy array shape, so pagination
+    // correctly stops after the one full page.
+    expect(props.hasMore).toBe(false);
+  });
+
+  it('renders an empty member list without crashing when the page shape is unrecognized', async () => {
+    server.use(
+      http.get(`${BASE_URL}/api/membership/community/community-malformed`, () =>
+        // Neither the cursor envelope nor a plain array — must not throw.
+        HttpResponse.json({}),
+      ),
+      http.get(`${BASE_URL}/api/presence/users/:userIds`, () =>
+        HttpResponse.json({ presence: {} }),
+      ),
+    );
+
+    renderWithProviders(
+      <MemberListContainer
+        contextType={VoiceSessionType.Channel}
+        contextId="channel-malformed"
+        communityId="community-malformed"
+        isPrivate={false}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('member-list-mock')).toBeInTheDocument();
+    });
+
+    const props = capturedPropsHistory[capturedPropsHistory.length - 1];
+    expect(props.members).toEqual([]);
+  });
+});

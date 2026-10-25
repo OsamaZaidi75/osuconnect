@@ -1,0 +1,178 @@
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Body,
+  Param,
+  HttpCode,
+  UseGuards,
+  ParseUUIDPipe,
+} from '@nestjs/common';
+import { ApiOkResponse, ApiCreatedResponse } from '@nestjs/swagger';
+import { JwtAuthGuard } from '@/auth/jwt-auth.guard';
+import { RbacGuard } from '@/auth/rbac.guard';
+import { RequiredActions } from '@/auth/rbac-action.decorator';
+import {
+  RbacResource,
+  RbacResourceType,
+  ResourceIdSource,
+} from '@/auth/rbac-resource.decorator';
+import { RbacActions } from '@prisma/client';
+import { AliasGroupsService } from './alias-groups.service';
+import {
+  AliasGroupWithMembersDto,
+  AliasGroupSummaryDto,
+} from './dto/alias-group-response.dto';
+import { CreateAliasGroupDto } from './dto/create-alias-group.dto';
+import { UpdateAliasGroupDto } from './dto/update-alias-group.dto';
+import { AddMemberDto } from './dto/add-member.dto';
+import { UpdateMembersDto } from './dto/update-members.dto';
+
+@Controller('alias-groups')
+@UseGuards(JwtAuthGuard, RbacGuard)
+export class AliasGroupsController {
+  constructor(private readonly aliasGroupsService: AliasGroupsService) {}
+
+  /**
+   * Get all alias groups for a community
+   */
+  @Get('community/:communityId')
+  @ApiOkResponse({ type: [AliasGroupSummaryDto] })
+  @RequiredActions(RbacActions.READ_ALIAS_GROUP)
+  @RbacResource({
+    type: RbacResourceType.COMMUNITY,
+    idKey: 'communityId',
+    source: ResourceIdSource.PARAM,
+  })
+  async getCommunityAliasGroups(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+  ): Promise<AliasGroupSummaryDto[]> {
+    return this.aliasGroupsService.getCommunityAliasGroups(communityId);
+  }
+
+  /**
+   * Create a new alias group
+   */
+  @Post('community/:communityId')
+  @ApiCreatedResponse({ type: AliasGroupWithMembersDto })
+  @RequiredActions(RbacActions.CREATE_ALIAS_GROUP)
+  @RbacResource({
+    type: RbacResourceType.COMMUNITY,
+    idKey: 'communityId',
+    source: ResourceIdSource.PARAM,
+  })
+  async createAliasGroup(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @Body() dto: CreateAliasGroupDto,
+  ): Promise<AliasGroupWithMembersDto> {
+    return this.aliasGroupsService.createAliasGroup(communityId, dto);
+  }
+
+  /**
+   * Get a single alias group with full member details
+   */
+  @Get(':groupId')
+  @ApiOkResponse({ type: AliasGroupWithMembersDto })
+  @RequiredActions(RbacActions.READ_ALIAS_GROUP)
+  @RbacResource({
+    type: RbacResourceType.ALIAS_GROUP,
+    idKey: 'groupId',
+    source: ResourceIdSource.PARAM,
+  })
+  async getAliasGroup(
+    @Param('groupId', ParseUUIDPipe) groupId: string,
+  ): Promise<AliasGroupWithMembersDto> {
+    return this.aliasGroupsService.getAliasGroup(groupId);
+  }
+
+  /**
+   * Update an alias group's name
+   */
+  @Put(':groupId')
+  @ApiOkResponse({ type: AliasGroupWithMembersDto })
+  @RequiredActions(RbacActions.UPDATE_ALIAS_GROUP)
+  @RbacResource({
+    type: RbacResourceType.ALIAS_GROUP,
+    idKey: 'groupId',
+    source: ResourceIdSource.PARAM,
+  })
+  async updateAliasGroup(
+    @Param('groupId', ParseUUIDPipe) groupId: string,
+    @Body() dto: UpdateAliasGroupDto,
+  ): Promise<AliasGroupWithMembersDto> {
+    return this.aliasGroupsService.updateAliasGroup(groupId, dto);
+  }
+
+  /**
+   * Delete an alias group
+   */
+  @Delete(':groupId')
+  @HttpCode(204)
+  @RequiredActions(RbacActions.DELETE_ALIAS_GROUP)
+  @RbacResource({
+    type: RbacResourceType.ALIAS_GROUP,
+    idKey: 'groupId',
+    source: ResourceIdSource.PARAM,
+  })
+  async deleteAliasGroup(
+    @Param('groupId', ParseUUIDPipe) groupId: string,
+  ): Promise<void> {
+    return this.aliasGroupsService.deleteAliasGroup(groupId);
+  }
+
+  /**
+   * Add a member to an alias group
+   */
+  @Post(':groupId/members')
+  @HttpCode(204)
+  @RequiredActions(RbacActions.CREATE_ALIAS_GROUP_MEMBER)
+  @RbacResource({
+    type: RbacResourceType.ALIAS_GROUP,
+    idKey: 'groupId',
+    source: ResourceIdSource.PARAM,
+  })
+  async addMember(
+    @Param('groupId', ParseUUIDPipe) groupId: string,
+    @Body() dto: AddMemberDto,
+  ): Promise<void> {
+    return this.aliasGroupsService.addMember(groupId, dto.userId);
+  }
+
+  /**
+   * Remove a member from an alias group
+   */
+  @Delete(':groupId/members/:userId')
+  @HttpCode(204)
+  @RequiredActions(RbacActions.DELETE_ALIAS_GROUP_MEMBER)
+  @RbacResource({
+    type: RbacResourceType.ALIAS_GROUP,
+    idKey: 'groupId',
+    source: ResourceIdSource.PARAM,
+  })
+  async removeMember(
+    @Param('groupId', ParseUUIDPipe) groupId: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ): Promise<void> {
+    return this.aliasGroupsService.removeMember(groupId, userId);
+  }
+
+  /**
+   * Replace all members of an alias group
+   */
+  @Put(':groupId/members')
+  @HttpCode(204)
+  @RequiredActions(RbacActions.UPDATE_ALIAS_GROUP_MEMBER)
+  @RbacResource({
+    type: RbacResourceType.ALIAS_GROUP,
+    idKey: 'groupId',
+    source: ResourceIdSource.PARAM,
+  })
+  async updateMembers(
+    @Param('groupId', ParseUUIDPipe) groupId: string,
+    @Body() dto: UpdateMembersDto,
+  ): Promise<void> {
+    return this.aliasGroupsService.updateMembers(groupId, dto.memberIds);
+  }
+}

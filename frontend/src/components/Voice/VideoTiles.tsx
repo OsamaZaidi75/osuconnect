@@ -1,0 +1,736 @@
+import React, { useEffect, useMemo, useCallback, useState } from 'react';
+import {
+  Box,
+  IconButton,
+  Tooltip,
+} from '@mui/material';
+import { useTheme, alpha } from '@mui/material/styles';
+import {
+  CropFree,
+  GridView,
+  ViewSidebar,
+} from '@mui/icons-material';
+import { useVoiceConnection } from '../../hooks/useVoiceConnection';
+import { useLocalMediaState } from '../../hooks/useLocalMediaState';
+import { useResponsive } from '../../hooks/useResponsive';
+import { useReplayBufferState } from '../../contexts/ReplayBufferContext';
+import { useVoice, useVoiceDispatch, VoiceActionType } from '../../contexts/VoiceContext';
+import { useTrackSubscriptionActions } from '../../hooks/useTrackSubscription';
+import VideoTile from './VideoTile';
+import CompactVoiceTile, { COMPACT_TILE_HEIGHT } from './CompactVoiceTile';
+import SoloCallPanel from './SoloCallPanel';
+import { useServerMutedVoiceUsers } from '../../hooks/useServerMutedVoiceUsers';
+import { ROOM_EVENT } from '../../features/voice/livekitEvents';
+import { VoiceSessionType } from '../../contexts/VoiceContext';
+import { VideoLayoutMode } from '../../types/videoLayout';
+
+// Re-exported so existing importers of VideoLayoutMode from this module keep working.
+export { VideoLayoutMode };
+
+// Constants
+const GRID_CONSTANTS = {
+  SIDEBAR_WIDTH: 200,
+  SIDEBAR_TILE_HEIGHT: 150,
+  HEADER_HEIGHT: 48,
+  MAX_SIDEBAR_TILES: 6,
+} as const;
+
+/**
+ * On the phone, more tiles than this switch the grid to compact avatar tiles
+ * (a scrolling multi-column grid) so a 25-person call stays legible instead
+ * of squeezing every tile into one screen.
+ */
+export const PHONE_COMPACT_TILE_THRESHOLD = 6;
+/** Minimum compact-tile width: 3 columns at 320-390px, more in landscape. */
+const COMPACT_TILE_MIN_WIDTH = 96;
+/**
+ * Desktop grid: no camera/avatar tile grows past this (about a third of a
+ * 1920 screen), so a small call doesn't fill a big monitor with grey. Screen
+ * shares are exempt — they need the room.
+ */
+export const GRID_TILE_MAX_WIDTH = 640;
+const GRID_TILE_MAX_HEIGHT = 480;
+import { Track, RoomEvent } from 'livekit-client';
+import type {
+  TrackPublication,
+  RemoteParticipant,
+  LocalParticipant,
+} from 'livekit-client';
+
+interface VideoTileData {
+  participant: RemoteParticipant | LocalParticipant;
+  videoTrack?: TrackPublication;
+  screenTrack?: TrackPublication;
+  audioTrack?: TrackPublication;
+  isLocal: boolean;
+  tileType: 'camera' | 'screen' | 'placeholder-camera' | 'placeholder-screen' | 'avatar';
+  tileId: string; // unique identifier for this tile
+}
+
+export const VideoTiles: React.FC = () => {
+  const theme = useTheme();
+  const { state } = useVoiceConnection();
+  const { isCameraEnabled, isScreenShareEnabled } = useLocalMediaState();
+  const { isMobile, isPortrait } = useResponsive();
+  const { isReplayBufferActive } = useReplayBufferState();
+  const { watchingCameras, watchingScreenShares, hiddenLocalTiles, layoutMode, pinnedTileId, spotlightTileId } = useVoice();
+  const { dispatch } = useVoiceDispatch();
+  const trackActions = useTrackSubscriptionActions();
+  const [trackUpdate, setTrackUpdate] = useState(0); // Force re-render on track changes
+  const serverMuted = useServerMutedVoiceUsers(
+    state.contextType === VoiceSessionType.Channel ? state.currentChannelId : null,
+  );
+
+  // Define callbacks before any early returns (React hooks must be called unconditionally)
+  // Memoize grid layout calculation
+  const getGridCols = useCallback((tileCount: number) => {
+    // Mobile: use 1-2 columns max for better visibility
+    if (isMobile) {
+      if (tileCount <= 1) return 1;
+      if (tileCount <= 4) return isPortrait ? 1 : 2;
+      return 2;
+    }
+
+    // Desktop: original logic
+    if (tileCount <= 1) return 1;
+    if (tileCount <= 4) return 2;
+    if (tileCount <= 9) return 3;
+    return 4;
+  }, [isMobile, isPortrait]);
+
+  const handleTilePin = useCallback((tileId: string) => {
+    dispatch({ type: VoiceActionType.TogglePinTile, payload: tileId });
+  }, [dispatch]);
+
+  const handleTileSpotlight = useCallback((tileId: string) => {
+    dispatch({ type: VoiceActionType.ToggleSpotlightTile, payload: tileId });
+  }, [dispatch]);
+
+  // Memoize video tiles to avoid recalculating on every render
+  const videoTiles = useMemo((): VideoTileData[] => {
+    if (!state.room) return [];
+
+    const tiles: VideoTileData[] = [];
+    const localParticipant = state.room.localParticipant;
+    const participants = Array.from(state.room.remoteParticipants.values());
+
+    // Add local participant tiles (hidden ones become placeholders); if none
+    // of this produces a tile, an avatar tile is added below.
+    // Pick the microphone publication explicitly — a screen share with audio also
+    // publishes a ScreenShareAudio track, which must not drive the mic indicator.
+    const localAudioTrack = Array.from(localParticipant.audioTrackPublications.values()).find(
+      (track: TrackPublication) => track.source === Track.Source.Microphone
+    );
+    const localTileCountBefore = tiles.length;
+
+    if (isCameraEnabled || isScreenShareEnabled) {
+      const videoTracks = Array.from(localParticipant.videoTrackPublications.values());
+
+      const videoTrack = videoTracks.find((track: TrackPublication) =>
+        track.source !== 'screen_share' && track.source !== 'screen_share_audio'
+      );
+      const screenTrack = videoTracks.find((track: TrackPublication) =>
+        track.source === 'screen_share' || track.source === 'screen_share_audio'
+      );
+
+      const cameraHidden = hiddenLocalTiles.has('camera');
+      const screenHidden = hiddenLocalTiles.has('screen');
+
+      if (videoTrack && !videoTrack.isMuted) {
+        if (cameraHidden) {
+          tiles.push({
+            participant: localParticipant,
+            isLocal: true,
+            tileType: 'placeholder-camera',
+            tileId: `${localParticipant.identity}-placeholder-camera`
+          });
+        } else {
+          tiles.push({
+            participant: localParticipant,
+            videoTrack,
+            audioTrack: localAudioTrack,
+            isLocal: true,
+            tileType: 'camera',
+            tileId: `${localParticipant.identity}-camera`
+          });
+        }
+      }
+      if (screenTrack) {
+        if (screenHidden) {
+          tiles.push({
+            participant: localParticipant,
+            isLocal: true,
+            tileType: 'placeholder-screen',
+            tileId: `${localParticipant.identity}-placeholder-screen`
+          });
+        } else {
+          tiles.push({
+            participant: localParticipant,
+            screenTrack,
+            audioTrack: localAudioTrack,
+            isLocal: true,
+            tileType: 'screen',
+            tileId: `${localParticipant.identity}-screen`
+          });
+        }
+      }
+    }
+
+    // No camera/screen tile produced for the local participant — fall back
+    // to an avatar tile so they always appear in the grid.
+    if (tiles.length === localTileCountBefore) {
+      tiles.push({
+        participant: localParticipant,
+        audioTrack: localAudioTrack,
+        isLocal: true,
+        tileType: 'avatar',
+        tileId: `${localParticipant.identity}-avatar`
+      });
+    }
+
+    // Add remote participant tiles — only subscribed (watched) tracks get real tiles;
+    // unwatched tracks get placeholder tiles so users can opt in from the grid.
+    participants.forEach(participant => {
+      const videoTracks = Array.from(participant.videoTrackPublications.values());
+      // Pick the microphone publication explicitly — a screen share with audio also
+      // publishes a ScreenShareAudio track, which must not drive the mic indicator.
+      const audioTrack = Array.from(participant.audioTrackPublications.values()).find(
+        (track: TrackPublication) => track.source === Track.Source.Microphone
+      );
+
+      const videoTrack = videoTracks.find((track: TrackPublication) =>
+        track.source !== 'screen_share' && track.source !== 'screen_share_audio'
+      );
+      const screenTrack = videoTracks.find((track: TrackPublication) =>
+        track.source === 'screen_share' || track.source === 'screen_share_audio'
+      );
+
+      const isWatchingCamera = watchingCameras.has(participant.identity);
+      const isWatchingScreen = watchingScreenShares.has(participant.identity);
+      const tileCountBefore = tiles.length;
+
+      // Camera tile
+      if (videoTrack && !videoTrack.isMuted) {
+        if (isWatchingCamera) {
+          tiles.push({
+            participant,
+            videoTrack,
+            audioTrack,
+            isLocal: false,
+            tileType: 'camera',
+            tileId: `${participant.identity}-camera`
+          });
+        } else {
+          tiles.push({
+            participant,
+            isLocal: false,
+            tileType: 'placeholder-camera',
+            tileId: `${participant.identity}-placeholder-camera`
+          });
+        }
+      }
+
+      // Screen share tile
+      if (screenTrack) {
+        if (isWatchingScreen) {
+          tiles.push({
+            participant,
+            screenTrack,
+            audioTrack,
+            isLocal: false,
+            tileType: 'screen',
+            tileId: `${participant.identity}-screen`
+          });
+        } else {
+          tiles.push({
+            participant,
+            isLocal: false,
+            tileType: 'placeholder-screen',
+            tileId: `${participant.identity}-placeholder-screen`
+          });
+        }
+      }
+
+      // No camera/screen tile produced for this participant — fall back to
+      // an avatar tile so every connected participant appears in the grid.
+      if (tiles.length === tileCountBefore) {
+        tiles.push({
+          participant,
+          audioTrack,
+          isLocal: false,
+          tileType: 'avatar',
+          tileId: `${participant.identity}-avatar`
+        });
+      }
+    });
+
+    return tiles;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- trackUpdate triggers recomputation when remote tracks change
+  }, [state.room, isCameraEnabled, isScreenShareEnabled, trackUpdate, watchingCameras, watchingScreenShares, hiddenLocalTiles]);
+
+  // Listen to LiveKit room events for track publications/unpublications
+  useEffect(() => {
+    if (!state.room) return;
+
+    const handleTrackChange = () => {
+      setTrackUpdate((prev) => prev + 1);
+    };
+
+    // Local participant events
+    state.room.localParticipant.on('trackPublished', handleTrackChange);
+    state.room.localParticipant.on('trackUnpublished', handleTrackChange);
+
+    // Remote participant events (Room-level events cover all remote participants)
+    state.room.on(RoomEvent.TrackPublished, handleTrackChange);
+    state.room.on(RoomEvent.TrackUnpublished, handleTrackChange);
+    state.room.on(RoomEvent.TrackSubscribed, handleTrackChange);
+    state.room.on(RoomEvent.TrackUnsubscribed, handleTrackChange);
+    state.room.on(RoomEvent.TrackMuted, handleTrackChange);
+    state.room.on(RoomEvent.TrackUnmuted, handleTrackChange);
+    state.room.on(RoomEvent.ParticipantDisconnected, handleTrackChange);
+    state.room.on(RoomEvent.ParticipantConnected, handleTrackChange);
+    // Deafen state lives in participant metadata
+    state.room.on(ROOM_EVENT.ParticipantMetadataChanged, handleTrackChange);
+
+    return () => {
+      state.room?.localParticipant.off('trackPublished', handleTrackChange);
+      state.room?.localParticipant.off('trackUnpublished', handleTrackChange);
+      state.room?.off(RoomEvent.TrackPublished, handleTrackChange);
+      state.room?.off(RoomEvent.TrackUnpublished, handleTrackChange);
+      state.room?.off(RoomEvent.TrackSubscribed, handleTrackChange);
+      state.room?.off(RoomEvent.TrackUnsubscribed, handleTrackChange);
+      state.room?.off(RoomEvent.TrackMuted, handleTrackChange);
+      state.room?.off(RoomEvent.TrackUnmuted, handleTrackChange);
+      state.room?.off(RoomEvent.ParticipantDisconnected, handleTrackChange);
+      state.room?.off(RoomEvent.ParticipantConnected, handleTrackChange);
+      state.room?.off(ROOM_EVENT.ParticipantMetadataChanged, handleTrackChange);
+    };
+  }, [state.room]);
+
+  // Callback for placeholder tile watch/show actions
+  const handleWatchTile = useCallback((tile: VideoTileData) => {
+    if (tile.isLocal) {
+      // Local placeholder — show the hidden tile
+      const type = tile.tileType === 'placeholder-camera' ? 'camera' : 'screen';
+      dispatch({ type: VoiceActionType.ShowLocalTile, payload: type });
+    } else if (tile.tileType === 'placeholder-camera') {
+      trackActions?.watchCamera(tile.participant.identity);
+    } else if (tile.tileType === 'placeholder-screen') {
+      trackActions?.watchScreenShare(tile.participant.identity);
+    }
+  }, [trackActions, dispatch]);
+
+  // Callback for stopping watching a remote tile
+  const handleStopWatchingTile = useCallback((tile: VideoTileData) => {
+    if (tile.tileType === 'camera') {
+      trackActions?.stopWatchingCamera(tile.participant.identity);
+    } else if (tile.tileType === 'screen') {
+      trackActions?.stopWatchingScreenShare(tile.participant.identity);
+    }
+  }, [trackActions]);
+
+  // Callback for hiding a local tile
+  const handleHideLocalTile = useCallback((tile: VideoTileData) => {
+    const type = tile.tileType === 'camera' ? 'camera' : 'screen';
+    dispatch({ type: VoiceActionType.HideLocalTile, payload: type });
+  }, [dispatch]);
+
+  // Watch + pin a placeholder tile (subscribe then make it the main sidebar view).
+  // TogglePinTile flips pin state, so only dispatch if this tile isn't already
+  // pinned — avoids unpinning a stale pinnedTileId left over from a prior
+  // watch/unwatch cycle on the same tile.
+  const handleWatchAndPin = useCallback((tile: VideoTileData) => {
+    handleWatchTile(tile);
+    const realTileId = tile.tileId.replace('placeholder-', '');
+    if (pinnedTileId !== realTileId) {
+      dispatch({ type: VoiceActionType.TogglePinTile, payload: realTileId });
+    }
+  }, [handleWatchTile, pinnedTileId, dispatch]);
+
+  // Filter out placeholder tiles for focused layouts
+  const watchedTiles = useMemo(
+    () => videoTiles.filter(t => !t.tileType.startsWith('placeholder')),
+    [videoTiles],
+  );
+
+  // Early return if not connected
+  if (!state.isConnected || !state.room) {
+    return null;
+  }
+
+  // Layout rendering functions
+  const renderGridTile = (tile: VideoTileData, compact = false) => (
+    <VideoTile
+      compact={compact}
+      isServerMuted={serverMuted.has(tile.participant.identity)}
+      participant={tile.participant}
+      videoTrack={tile.videoTrack}
+      audioTrack={tile.audioTrack}
+      screenTrack={tile.screenTrack}
+      isLocal={tile.isLocal}
+      isReplayBufferActive={isReplayBufferActive}
+      onToggleFullscreen={tile.tileType.startsWith('placeholder') ? undefined : () => handleTileSpotlight(tile.tileId)}
+      isSpotlighted={spotlightTileId === tile.tileId}
+      isPlaceholder={tile.tileType.startsWith('placeholder')}
+      placeholderType={tile.tileType === 'placeholder-camera' ? 'camera' : tile.tileType === 'placeholder-screen' ? 'screen' : undefined}
+      onWatch={tile.tileType === 'avatar' ? undefined : () => handleWatchTile(tile)}
+      onStopWatching={
+        tile.tileType.startsWith('placeholder') || tile.tileType === 'avatar' ? undefined :
+        tile.isLocal ? () => handleHideLocalTile(tile) :
+        () => handleStopWatchingTile(tile)
+      }
+    />
+  );
+
+  // Phone, big call: a scrolling grid of fixed-size compact tiles. Voice-only
+  // people get a small avatar tile; watched video spans the full row so it's
+  // still worth watching; unwatched streams keep their "tap to watch" tile.
+  const renderCompactGridLayout = () => (
+    <Box
+      data-testid="video-tiles-grid"
+      data-density="compact"
+      sx={{
+        display: 'grid',
+        gridTemplateColumns: `repeat(auto-fill, minmax(${COMPACT_TILE_MIN_WIDTH}px, 1fr))`,
+        gridAutoFlow: 'row dense',
+        alignContent: 'start',
+        gap: 0.75,
+        height: '100%',
+        width: '100%',
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        overscrollBehavior: 'contain',
+        boxSizing: 'border-box',
+      }}
+    >
+      {videoTiles.map((tile) => {
+        if (tile.tileType === 'avatar') {
+          return (
+            <CompactVoiceTile
+              key={tile.tileId}
+              participant={tile.participant}
+              audioTrack={tile.audioTrack}
+              isLocal={tile.isLocal}
+              isServerMuted={serverMuted.has(tile.participant.identity)}
+            />
+          );
+        }
+        const isLiveVideo = tile.tileType === 'camera' || tile.tileType === 'screen';
+        return (
+          <Box
+            key={tile.tileId}
+            sx={
+              isLiveVideo
+                ? { gridColumn: '1 / -1', aspectRatio: '16 / 9', minWidth: 0 }
+                : { height: COMPACT_TILE_HEIGHT, minWidth: 0 }
+            }
+          >
+            {renderGridTile(tile)}
+          </Box>
+        );
+      })}
+    </Box>
+  );
+
+  const renderGridLayout = () => {
+    if (isMobile && videoTiles.length > PHONE_COMPACT_TILE_THRESHOLD) {
+      return renderCompactGridLayout();
+    }
+
+    const cols = getGridCols(videoTiles.length);
+    const rows = Math.ceil(videoTiles.length / cols);
+    const tileWidth = `${100 / cols}%`;
+    const tileHeight = `${100 / rows}%`;
+    // Desktop only, and not with a screen share in the grid (see GRID_TILE_MAX_WIDTH)
+    const capped = !isMobile && !videoTiles.some((t) => t.tileType === 'screen');
+
+    return (
+      <Box
+        data-testid="video-tiles-grid"
+        data-density="regular"
+        data-capped={capped ? 'true' : 'false'}
+        sx={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          height: '100%',
+          width: '100%',
+          overflow: 'hidden',
+          ...(capped && { justifyContent: 'center', alignContent: 'center' }),
+        }}
+      >
+        {videoTiles.map((tile) => (
+          <Box
+            key={tile.tileId}
+            sx={{
+              width: tileWidth,
+              height: tileHeight,
+              ...(capped && { maxWidth: GRID_TILE_MAX_WIDTH, maxHeight: GRID_TILE_MAX_HEIGHT }),
+              p: 0.5,
+              boxSizing: 'border-box',
+            }}
+          >
+            {renderGridTile(tile)}
+          </Box>
+        ))}
+      </Box>
+    );
+  };
+
+  // Alone in the call (and not sharing a screen): a "you're the only one
+  // here" panel with your own tile as a corner thumbnail.
+  const isSolo =
+    state.room.remoteParticipants.size === 0 &&
+    videoTiles.length > 0 &&
+    videoTiles.every((t) => t.isLocal && (t.tileType === 'avatar' || t.tileType === 'camera'));
+
+  const renderSoloLayout = () => {
+    const ownTile = videoTiles.find((t) => t.tileType === 'camera') ?? videoTiles[0];
+    const isChannel = state.contextType === VoiceSessionType.Channel;
+    return (
+      <SoloCallPanel
+        compact={isMobile}
+        title={(isChannel ? state.channelName : state.dmGroupName) || 'Voice'}
+        channelLink={
+          isChannel && state.communityId && state.currentChannelId
+            ? { communityId: state.communityId, channelId: state.currentChannelId }
+            : undefined
+        }
+        thumbnail={
+          <VideoTile
+            compact
+            participant={ownTile.participant}
+            videoTrack={ownTile.videoTrack}
+            audioTrack={ownTile.audioTrack}
+            isLocal
+            isReplayBufferActive={isReplayBufferActive}
+            isServerMuted={serverMuted.has(ownTile.participant.identity)}
+          />
+        }
+      />
+    );
+  };
+
+  const renderSidebarLayout = () => {
+    const pinnedTile = watchedTiles.find(tile => tile.tileId === pinnedTileId) || watchedTiles[0];
+    if (!pinnedTile) return renderGridLayout(); // Fall back to grid if nothing watched
+
+    // Sidebar: other watched tiles + placeholder tiles for unwatched participants
+    const placeholderTiles = videoTiles.filter(t => t.tileType.startsWith('placeholder'));
+    const otherWatched = watchedTiles.filter(tile => tile.tileId !== pinnedTile.tileId);
+    const sidebarTiles = [...otherWatched, ...placeholderTiles].slice(0, GRID_CONSTANTS.MAX_SIDEBAR_TILES);
+
+    // Portrait phone: a side-by-side split leaves the pinned item a ~170px
+    // column (a 16:9 share becomes a thin strip), so stack instead — the
+    // pinned tile spans the full width on top, the rest scroll below it.
+    const stacked = isMobile && isPortrait;
+
+    return (
+      <Box
+        data-testid="video-tiles-sidebar"
+        data-stacked={stacked ? 'true' : 'false'}
+        sx={{
+          display: 'flex',
+          flexDirection: stacked ? 'column' : 'row',
+          height: '100%',
+          gap: 1,
+          overflow: 'hidden',
+        }}
+      >
+        {/* Main pinned video */}
+        <Box
+          sx={
+            stacked
+              ? { width: '100%', aspectRatio: '16 / 9', maxHeight: '60%', flexShrink: 0, minHeight: 0 }
+              : { flex: 1, minWidth: 0, height: '100%' }
+          }
+        >
+          <VideoTile
+            isServerMuted={serverMuted.has(pinnedTile.participant.identity)}
+            participant={pinnedTile.participant}
+            videoTrack={pinnedTile.videoTrack}
+            audioTrack={pinnedTile.audioTrack}
+            screenTrack={pinnedTile.screenTrack}
+            isLocal={pinnedTile.isLocal}
+            isReplayBufferActive={isReplayBufferActive}
+            onToggleFullscreen={() => handleTileSpotlight(pinnedTile.tileId)}
+            isSpotlighted={spotlightTileId === pinnedTile.tileId}
+            isFocused
+            onStopWatching={
+              pinnedTile.tileType === 'avatar' ? undefined :
+              pinnedTile.isLocal ? () => handleHideLocalTile(pinnedTile) :
+              () => handleStopWatchingTile(pinnedTile)
+            }
+          />
+        </Box>
+
+        {/* Sidebar with other videos + placeholders */}
+        {sidebarTiles.length > 0 && (
+          <Box sx={
+            stacked
+              ? {
+                  flex: 1,
+                  minHeight: 0,
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                  gridAutoRows: '120px',
+                  gap: 1,
+                  overflowY: 'auto',
+                }
+              : {
+                  width: GRID_CONSTANTS.SIDEBAR_WIDTH,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 1,
+                  overflowY: 'auto',
+                  height: '100%',
+                  flexShrink: 0,
+                }
+          }>
+            {sidebarTiles.map((tile) => (
+              <Box key={tile.tileId} sx={{
+                height: stacked ? '100%' : GRID_CONSTANTS.SIDEBAR_TILE_HEIGHT,
+                flexShrink: 0,
+                minWidth: 0,
+              }}>
+                <VideoTile
+                  isServerMuted={serverMuted.has(tile.participant.identity)}
+                  participant={tile.participant}
+                  videoTrack={tile.videoTrack}
+                  audioTrack={tile.audioTrack}
+                  screenTrack={tile.screenTrack}
+                  isLocal={tile.isLocal}
+                  isReplayBufferActive={isReplayBufferActive}
+                  onToggleFullscreen={tile.tileType.startsWith('placeholder') ? undefined : () => handleTilePin(tile.tileId)}
+                  isSpotlighted={spotlightTileId === tile.tileId}
+                  isPlaceholder={tile.tileType.startsWith('placeholder')}
+                  placeholderType={tile.tileType === 'placeholder-camera' ? 'camera' : tile.tileType === 'placeholder-screen' ? 'screen' : undefined}
+                  onWatch={tile.tileType === 'avatar' ? undefined : () => handleWatchAndPin(tile)}
+                  onStopWatching={
+                    tile.tileType.startsWith('placeholder') || tile.tileType === 'avatar' ? undefined :
+                    tile.isLocal ? () => handleHideLocalTile(tile) :
+                    () => handleStopWatchingTile(tile)
+                  }
+                />
+              </Box>
+            ))}
+          </Box>
+        )}
+      </Box>
+    );
+  };
+
+  const renderSpotlightLayout = () => {
+    const spotlightedTile = watchedTiles.find(tile => tile.tileId === spotlightTileId) || watchedTiles[0];
+    if (!spotlightedTile) return renderGridLayout(); // Fall back to grid if nothing watched
+
+    return (
+      <Box sx={{ height: '100%', width: '100%' }}>
+        <VideoTile
+          isServerMuted={serverMuted.has(spotlightedTile.participant.identity)}
+          participant={spotlightedTile.participant}
+          videoTrack={spotlightedTile.videoTrack}
+          audioTrack={spotlightedTile.audioTrack}
+          screenTrack={spotlightedTile.screenTrack}
+          isLocal={spotlightedTile.isLocal}
+          isReplayBufferActive={isReplayBufferActive}
+          onToggleFullscreen={() => handleTileSpotlight(spotlightedTile.tileId)}
+          isSpotlighted={true}
+          isFocused
+          onStopWatching={
+            spotlightedTile.tileType === 'avatar' ? undefined :
+            spotlightedTile.isLocal ? () => handleHideLocalTile(spotlightedTile) :
+            () => handleStopWatchingTile(spotlightedTile)
+          }
+        />
+      </Box>
+    );
+  };
+
+  return (
+    <Box sx={{
+      width: '100%',
+      height: '100%',
+      backgroundColor: 'grey.900',
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden'
+    }}>
+      {/* Layout Controls Header - hide on mobile */}
+      {!isMobile && (
+        <Box
+          sx={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            alignItems: 'center',
+            p: 1,
+            borderBottom: `1px solid ${theme.palette.divider}`,
+            minHeight: GRID_CONSTANTS.HEADER_HEIGHT,
+            flexShrink: 0
+          }}
+        >
+          {/* Layout mode buttons */}
+          <Box sx={{ display: 'flex', gap: 0.5 }}>
+            <Tooltip title="Grid Layout">
+              <IconButton
+                size="small"
+                onClick={() => dispatch({ type: VoiceActionType.SetLayoutMode, payload: VideoLayoutMode.Grid })}
+                sx={{
+                  backgroundColor: layoutMode === VideoLayoutMode.Grid ? alpha(theme.palette.primary.main, 0.8) : theme.palette.action.hover,
+                  color: theme.palette.text.primary,
+                  '&:hover': {
+                    backgroundColor: layoutMode === VideoLayoutMode.Grid ? theme.palette.primary.main : theme.palette.action.selected,
+                  },
+                }}
+              >
+                <GridView fontSize="small" />
+              </IconButton>
+            </Tooltip>
+
+            <Tooltip title="Sidebar Layout">
+              <IconButton
+                size="small"
+                onClick={() => dispatch({ type: VoiceActionType.SetLayoutMode, payload: VideoLayoutMode.Sidebar })}
+                sx={{
+                  backgroundColor: layoutMode === VideoLayoutMode.Sidebar ? alpha(theme.palette.primary.main, 0.8) : theme.palette.action.hover,
+                  color: theme.palette.text.primary,
+                  '&:hover': {
+                    backgroundColor: layoutMode === VideoLayoutMode.Sidebar ? theme.palette.primary.main : theme.palette.action.selected,
+                  },
+                }}
+              >
+                <ViewSidebar fontSize="small" />
+              </IconButton>
+            </Tooltip>
+
+            <Tooltip title="Spotlight Layout">
+              <IconButton
+                size="small"
+                onClick={() => dispatch({ type: VoiceActionType.SetLayoutMode, payload: VideoLayoutMode.Spotlight })}
+                sx={{
+                  backgroundColor: layoutMode === VideoLayoutMode.Spotlight ? alpha(theme.palette.primary.main, 0.8) : theme.palette.action.hover,
+                  color: theme.palette.text.primary,
+                  '&:hover': {
+                    backgroundColor: layoutMode === VideoLayoutMode.Spotlight ? theme.palette.primary.main : theme.palette.action.selected,
+                  },
+                }}
+              >
+                <CropFree fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Box>
+        </Box>
+      )}
+
+      {/* Main Video Area */}
+      <Box sx={{ flex: 1, overflow: 'hidden', p: isMobile ? 0.5 : 1, minHeight: 0 }}>
+        {isSolo ? renderSoloLayout() : (
+          <>
+            {layoutMode === VideoLayoutMode.Grid && renderGridLayout()}
+            {layoutMode === VideoLayoutMode.Sidebar && renderSidebarLayout()}
+            {layoutMode === VideoLayoutMode.Spotlight && renderSpotlightLayout()}
+          </>
+        )}
+      </Box>
+    </Box>
+  );
+};

@@ -1,0 +1,25 @@
+# Example: NFS Storage Configuration Override
+#
+# To use NFS storage for file uploads, create a custom values file
+# with your NFS server details and apply it during Helm install/upgrade:
+#
+# helm upgrade semaphore-chat . --namespace semaphore-chat -f values-examples/nfs-storage.yaml
+#
+# Or use --set flags:
+# helm upgrade semaphore-chat . --namespace semaphore-chat \
+#   --set fileStorage.enabled=true \
+#   --set fileStorage.nfs.enabled=true \
+#   --set fileStorage.nfs.server=YOUR_NFS_SERVER \
+#   --set fileStorage.nfs.path=YOUR_NFS_PATH
+
+fileStorage:
+  enabled: true
+  size: 100Gi
+  storageClassName: ""
+
+  nfs:
+    enabled: true
+    # Replace with your NFS server IP or hostname
+    server: "10.0.0.100"
+    # Replace with your NFS export path
+    path: "/mnt/pool/semaphore/uploads"

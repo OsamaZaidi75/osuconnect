@@ -1,0 +1,38 @@
+name: Deploy Documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs-site/**'
+      - '.github/workflows/deploy-docs.yml'
+  workflow_dispatch:
+
+# Serialize gh-pages deploys. `mkdocs gh-deploy --force` force-pushes the
+# whole site, so two overlapping runs race and the slower one — possibly the
+# older commit — wins. cancel-in-progress: false never interrupts a running
+# deploy; GitHub only skips a deploy that is still *pending* when an even newer
+# one queues behind it, and that newer full-site build supersedes it anyway
+# (same pattern as GitHub's own Pages starter workflows).
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r docs-site/requirements.txt
+
+      - name: Build and deploy
+        run: cd docs-site && mkdocs gh-deploy --force

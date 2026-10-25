@@ -1,0 +1,43 @@
+import '@testing-library/jest-dom/vitest';
+import { configure } from '@testing-library/react';
+import { beforeAll, afterEach, afterAll } from 'vitest';
+import { server } from './msw/server';
+
+// Note: axe-core a11y assertions use `expectNoAxeViolations()` from
+// `../test-utils/a11y`, not a `toHaveNoViolations` custom matcher.
+// vitest-axe@0.1.0's `toHaveNoViolations` is broken for this project's
+// vitest/TS versions two different ways (its `extend-expect` entrypoint
+// ships an empty dist file, and its `matchers` entrypoint re-exports the
+// function `export type`-only, so it can't be used as a value) — see
+// test-utils/a11y.ts for the full explanation.
+
+// RTL's default findBy*/waitFor timeout (1000ms) assumes a lightly-loaded
+// machine. Under v8 coverage instrumentation + constrained CI parallelism,
+// real timers (debounce, MSW round-trips) can occasionally take longer to
+// fire even though nothing is actually stuck — bumping this gives assertions
+// realistic headroom instead of trading it for a global vitest testTimeout
+// bump alone.
+configure({ asyncUtilTimeout: 5000 });
+
+// msw 3 renamed `onUnhandledRequest` to `onUnhandledFrame` (the option now
+// covers any unhandled network frame, not just HTTP requests). `'bypass'`
+// keeps the old behaviour: a request with no matching handler goes to the
+// real network instead of being reported.
+beforeAll(() => server.listen({ onUnhandledFrame: 'bypass' }));
+afterEach(async () => {
+  server.resetHandlers();
+  // A test that faked the Electron bridge (setElectronAPIOverride) must not
+  // leave the next test running "in Electron". Imported here rather than at
+  // the top so that after a test's vi.resetModules() this clears the bridge
+  // instance the test's modules actually use, not a stale one.
+  const { setElectronAPIOverride } = await import('../utils/electronBridge');
+  setElectronAPIOverride(undefined);
+  // Composer drafts (useComposerDraft) live in sessionStorage; don't let one
+  // test's unsent text show up in the next test's composer.
+  try {
+    sessionStorage.clear();
+  } catch {
+    // ignore: storage may be stubbed by a test
+  }
+});
+afterAll(() => server.close());

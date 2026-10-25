@@ -1,0 +1,323 @@
+/**
+ * E2E Test Database Seed Script
+ *
+ * Seeds the test database with users, communities, channels, and messages
+ * for E2E testing. Run with: npx ts-node prisma/seed-e2e.ts
+ */
+
+import { PrismaClient, InstanceRole } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import * as bcrypt from 'bcrypt';
+import { DEFAULT_MEMBER_ROLE } from '../src/roles/default-roles.config';
+
+const prisma = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
+});
+
+const SALT_ROUNDS = 10;
+
+// Test users that match the E2E fixtures
+const TEST_USERS = [
+  {
+    username: 'testuser',
+    email: 'testuser@test.local',
+    password: 'Test123!@#',
+    displayName: 'Test User',
+    role: InstanceRole.OWNER, // OWNER role to allow community creation in E2E tests
+  },
+  {
+    username: 'testuser2',
+    email: 'testuser2@test.local',
+    password: 'Test123!@#',
+    displayName: 'Test User 2',
+    role: InstanceRole.OWNER, // OWNER role to allow community creation in E2E tests
+  },
+  {
+    username: 'admin',
+    email: 'admin@test.local',
+    password: 'Admin123!@#',
+    displayName: 'Admin User',
+    role: InstanceRole.OWNER,
+  },
+  {
+    // Non-privileged member: InstanceRole.USER does NOT bypass community RBAC
+    // (rbac.guard.ts only short-circuits for OWNER), and this user gets no
+    // community role granting MUTE_PARTICIPANT — used to assert moderator-mute
+    // is DENIED (403) for an ordinary member (REST-only, never drives the UI).
+    username: 'member',
+    email: 'member@test.local',
+    password: 'Member123!@#',
+    displayName: 'Member User',
+    role: InstanceRole.USER,
+  },
+  {
+    // 4th OWNER so the all-pairs matrix spec has four UI-capable participants.
+    username: 'testuser3',
+    email: 'testuser3@test.local',
+    password: 'Test123!@#',
+    displayName: 'Test User 3',
+    role: InstanceRole.OWNER,
+  },
+  // Voice access revocation (frontend/e2e/voice/revocation.spec.ts). Each
+  // scenario bans, re-passwords or revokes the sessions of its OWN user, so
+  // the users every other spec shares are never touched. Ban targets must be
+  // USERs (an instance OWNER can't be banned); they join voice through the
+  // community Member role below.
+  {
+    username: 'voiceban',
+    email: 'voiceban@test.local',
+    password: 'Test123!@#',
+    displayName: 'Voice Ban',
+    role: InstanceRole.USER,
+  },
+  {
+    username: 'voicedmban',
+    email: 'voicedmban@test.local',
+    password: 'Test123!@#',
+    displayName: 'Voice DM Ban',
+    role: InstanceRole.USER,
+  },
+  {
+    username: 'voicesession',
+    email: 'voicesession@test.local',
+    password: 'Test123!@#',
+    displayName: 'Voice Session',
+    role: InstanceRole.OWNER,
+  },
+  {
+    username: 'voicepassword',
+    email: 'voicepassword@test.local',
+    password: 'Test123!@#',
+    displayName: 'Voice Password',
+    role: InstanceRole.OWNER,
+  },
+];
+
+/**
+ * USERs that get the community Member role (the defaults in
+ * src/roles/default-roles.config.ts) in Test Community, so they can read it
+ * and join its voice channels. Other USERs (e.g. `member`) get no role.
+ */
+const COMMUNITY_MEMBER_ROLE_USERS = ['voiceban', 'voicedmban'];
+
+// Test communities
+const TEST_COMMUNITIES = [
+  {
+    name: 'Test Community',
+    description: 'A community for E2E testing',
+    channels: [
+      { name: 'general', type: 'TEXT' },
+      { name: 'random', type: 'TEXT' },
+      { name: 'voice-chat', type: 'VOICE' },
+      // Dedicated VOICE channels so each voice E2E spec gets its OWN LiveKit
+      // room — heavy multi-participant specs (reconnect, mute, screenshare)
+      // would otherwise contaminate each other's server-side room state.
+      { name: 'voice-reconnect', type: 'VOICE' },
+      { name: 'voice-mute', type: 'VOICE' },
+      { name: 'voice-video', type: 'VOICE' },
+      { name: 'voice-edge', type: 'VOICE' },
+      { name: 'voice-matrix', type: 'VOICE' },
+      { name: 'voice-perms', type: 'VOICE' },
+      { name: 'voice-soundboard', type: 'VOICE' },
+      { name: 'voice-revoke-ban', type: 'VOICE' },
+      { name: 'voice-revoke-session', type: 'VOICE' },
+      { name: 'voice-revoke-session-2', type: 'VOICE' },
+      { name: 'voice-revoke-password', type: 'VOICE' },
+    ],
+  },
+  {
+    name: 'Second Community',
+    description: 'Another test community',
+    channels: [
+      { name: 'welcome', type: 'TEXT' },
+      { name: 'announcements', type: 'TEXT' },
+    ],
+  },
+];
+
+// Instance invite code for registration
+const TEST_INVITE_CODE = 'test-invite';
+
+async function main() {
+  console.log('🌱 Seeding E2E test database...\n');
+
+  // Clean existing data
+  console.log('🧹 Cleaning existing data...');
+  await prisma.message.deleteMany({});
+  await prisma.channelMembership.deleteMany({});
+  await prisma.channel.deleteMany({});
+  await prisma.membership.deleteMany({});
+  await prisma.directMessageGroupMember.deleteMany({});
+  await prisma.directMessageGroup.deleteMany({});
+  await prisma.community.deleteMany({});
+  await prisma.refreshToken.deleteMany({});
+  await prisma.instanceInvite.deleteMany({});
+  await prisma.user.deleteMany({});
+
+  // Create instance invite code
+  console.log('🎟️  Creating instance invite code...');
+  await prisma.instanceInvite.create({
+    data: {
+      code: TEST_INVITE_CODE,
+      maxUses: 1000,
+      uses: 0,
+      validUntil: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year
+    },
+  });
+
+  // Create users
+  console.log('👥 Creating test users...');
+  const users: Record<string, string> = {};
+
+  for (const userData of TEST_USERS) {
+    const hashedPassword = await bcrypt.hash(userData.password, SALT_ROUNDS);
+    const user = await prisma.user.create({
+      data: {
+        username: userData.username,
+        email: userData.email,
+        hashedPassword: hashedPassword,
+        displayName: userData.displayName,
+        role: userData.role,
+      },
+    });
+    users[userData.username] = user.id;
+    console.log(`   ✓ Created user: ${userData.username}`);
+  }
+
+  // Create communities with channels
+  console.log('\n🏠 Creating test communities...');
+
+  for (const communityData of TEST_COMMUNITIES) {
+    // Create community
+    const community = await prisma.community.create({
+      data: {
+        name: communityData.name,
+        description: communityData.description,
+      },
+    });
+    console.log(`   ✓ Created community: ${communityData.name}`);
+
+    // Add all users as members
+    for (const [username, userId] of Object.entries(users)) {
+      await prisma.membership.create({
+        data: {
+          userId,
+          communityId: community.id,
+        },
+      });
+    }
+    console.log(`     → Added ${Object.keys(users).length} members`);
+
+    if (communityData.name === 'Test Community') {
+      const memberRole = await prisma.role.create({
+        data: {
+          name: DEFAULT_MEMBER_ROLE.name,
+          communityId: community.id,
+          isDefault: true,
+          position: DEFAULT_MEMBER_ROLE.position,
+          // The canonical list, so actions added later (SPEAK, VIDEO,
+          // SCREEN_SHARE in #570) reach the seeded role too: the migration
+          // backfill only covers roles that exist when it runs
+          actions: DEFAULT_MEMBER_ROLE.actions,
+        },
+      });
+      await prisma.userRoles.createMany({
+        data: COMMUNITY_MEMBER_ROLE_USERS.map((username) => ({
+          userId: users[username],
+          communityId: community.id,
+          roleId: memberRole.id,
+        })),
+      });
+      console.log(
+        `     → Gave the Member role to ${COMMUNITY_MEMBER_ROLE_USERS.join(', ')}`,
+      );
+    }
+
+    // Create channels
+    for (const channelData of communityData.channels) {
+      const channel = await prisma.channel.create({
+        data: {
+          name: channelData.name,
+          type: channelData.type as 'TEXT' | 'VOICE',
+          communityId: community.id,
+        },
+      });
+      console.log(`     → Created channel: #${channelData.name} (${channelData.type})`);
+
+      // Add some sample messages to text channels
+      if (channelData.type === 'TEXT' && channelData.name === 'general') {
+        const messages = [
+          { userId: users['testuser'], content: 'Welcome to the test community!' },
+          { userId: users['testuser2'], content: 'Hello everyone! 👋' },
+          { userId: users['admin'], content: 'This is a seeded message for E2E tests.' },
+        ];
+
+        for (const msg of messages) {
+          await prisma.message.create({
+            data: {
+              channelId: channel.id,
+              authorId: msg.userId,
+              spans: {
+                create: [
+                  {
+                    position: 0,
+                    type: 'PLAINTEXT',
+                    text: msg.content,
+                  },
+                ],
+              },
+              searchText: msg.content,
+            },
+          });
+        }
+        console.log(`       → Added ${messages.length} sample messages`);
+      }
+    }
+  }
+
+  // Create a DM group between test users
+  console.log('\n💬 Creating test DM group...');
+  const dmGroup = await prisma.directMessageGroup.create({
+    data: {
+      isGroup: false,
+    },
+  });
+
+  // Add members to the DM group
+  await prisma.directMessageGroupMember.createMany({
+    data: [
+      { groupId: dmGroup.id, userId: users['testuser'] },
+      { groupId: dmGroup.id, userId: users['testuser2'] },
+    ],
+  });
+  console.log('   ✓ Created DM group between testuser and testuser2');
+
+  // DM call ban scenario (frontend/e2e/voice/revocation.spec.ts)
+  const banDmGroup = await prisma.directMessageGroup.create({
+    data: { isGroup: false },
+  });
+  await prisma.directMessageGroupMember.createMany({
+    data: [
+      { groupId: banDmGroup.id, userId: users['testuser'] },
+      { groupId: banDmGroup.id, userId: users['voicedmban'] },
+    ],
+  });
+  console.log('   ✓ Created DM group between testuser and voicedmban');
+
+  console.log('\n✅ E2E database seeding complete!\n');
+  console.log('Test credentials:');
+  console.log('─────────────────');
+  for (const user of TEST_USERS) {
+    console.log(`  ${user.username}: ${user.password}`);
+  }
+  console.log(`\nInvite code: ${TEST_INVITE_CODE}`);
+}
+
+main()
+  .catch((e) => {
+    console.error('❌ Seeding failed:', e);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });

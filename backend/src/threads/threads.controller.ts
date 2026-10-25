@@ -1,0 +1,150 @@
+import {
+  Controller,
+  Get,
+  Post,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  HttpCode,
+  Req,
+  DefaultValuePipe,
+  ParseIntPipe,
+  ParseUUIDPipe,
+} from '@nestjs/common';
+import { ApiCreatedResponse, ApiOkResponse } from '@nestjs/swagger';
+import { ThreadsService } from './threads.service';
+import { CreateThreadReplyDto } from './dto/create-thread-reply.dto';
+import { JwtAuthGuard } from '@/auth/jwt-auth.guard';
+import { RbacGuard } from '@/auth/rbac.guard';
+import { RequiredActions } from '@/auth/rbac-action.decorator';
+import { RbacActions } from '@prisma/client';
+import {
+  RbacResource,
+  RbacResourceType,
+  ResourceIdSource,
+} from '@/auth/rbac-resource.decorator';
+
+import { AuthenticatedRequest } from '@/types';
+import {
+  ThreadReplyDto,
+  ThreadRepliesResponseDto,
+  ThreadMetadataDto,
+} from './dto/thread-response.dto';
+
+/**
+ * Controller for thread operations.
+ * Thread permissions are inherited from the parent message's context.
+ */
+@Controller('threads')
+@UseGuards(JwtAuthGuard, RbacGuard)
+export class ThreadsController {
+  constructor(private readonly threadsService: ThreadsService) {}
+
+  /**
+   * Create a reply in a thread.
+   * Permission check: Uses message resource type to verify access to parent message context.
+   */
+  @Post(':parentMessageId/replies')
+  @HttpCode(201)
+  @RequiredActions(RbacActions.CREATE_MESSAGE)
+  @RbacResource({
+    type: RbacResourceType.MESSAGE,
+    idKey: 'parentMessageId',
+    source: ResourceIdSource.PARAM,
+  })
+  @ApiCreatedResponse({ type: ThreadReplyDto })
+  async createReply(
+    @Param('parentMessageId', ParseUUIDPipe) parentMessageId: string,
+    @Body() body: Omit<CreateThreadReplyDto, 'parentMessageId'>,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ThreadReplyDto> {
+    const dto: CreateThreadReplyDto = {
+      ...body,
+      parentMessageId,
+    };
+    return this.threadsService.createThreadReply(dto, req.user.id);
+  }
+
+  /**
+   * Get paginated replies for a thread.
+   */
+  @Get(':parentMessageId/replies')
+  @RequiredActions(RbacActions.READ_MESSAGE)
+  @RbacResource({
+    type: RbacResourceType.MESSAGE,
+    idKey: 'parentMessageId',
+    source: ResourceIdSource.PARAM,
+  })
+  @ApiOkResponse({ type: ThreadRepliesResponseDto })
+  async getReplies(
+    @Param('parentMessageId', ParseUUIDPipe) parentMessageId: string,
+    @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit: number,
+    @Query('continuationToken') continuationToken?: string,
+  ): Promise<ThreadRepliesResponseDto> {
+    limit = Math.min(limit, 100);
+    return this.threadsService.getThreadRepliesWithMetadata(
+      parentMessageId,
+      limit,
+      continuationToken,
+    );
+  }
+
+  /**
+   * Get thread metadata (reply count, subscription status).
+   */
+  @Get(':parentMessageId/metadata')
+  @RequiredActions(RbacActions.READ_MESSAGE)
+  @RbacResource({
+    type: RbacResourceType.MESSAGE,
+    idKey: 'parentMessageId',
+    source: ResourceIdSource.PARAM,
+  })
+  @ApiOkResponse({ type: ThreadMetadataDto })
+  async getMetadata(
+    @Param('parentMessageId', ParseUUIDPipe) parentMessageId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ThreadMetadataDto> {
+    return this.threadsService.getThreadMetadata(parentMessageId, req.user.id);
+  }
+
+  /**
+   * Subscribe to a thread.
+   */
+  @Post(':parentMessageId/subscribe')
+  @HttpCode(204)
+  @RequiredActions(RbacActions.READ_MESSAGE)
+  @RbacResource({
+    type: RbacResourceType.MESSAGE,
+    idKey: 'parentMessageId',
+    source: ResourceIdSource.PARAM,
+  })
+  async subscribe(
+    @Param('parentMessageId', ParseUUIDPipe) parentMessageId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<void> {
+    await this.threadsService.subscribeToThread(parentMessageId, req.user.id);
+  }
+
+  /**
+   * Unsubscribe from a thread.
+   */
+  @Delete(':parentMessageId/subscribe')
+  @HttpCode(204)
+  @RequiredActions(RbacActions.READ_MESSAGE)
+  @RbacResource({
+    type: RbacResourceType.MESSAGE,
+    idKey: 'parentMessageId',
+    source: ResourceIdSource.PARAM,
+  })
+  async unsubscribe(
+    @Param('parentMessageId', ParseUUIDPipe) parentMessageId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<void> {
+    await this.threadsService.unsubscribeFromThread(
+      parentMessageId,
+      req.user.id,
+    );
+  }
+}

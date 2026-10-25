@@ -1,0 +1,1028 @@
+// The connection URL lives in prisma.config.ts (Prisma 7 no longer reads it
+// here); the app and the ts-node scripts connect through @prisma/adapter-pg.
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../node_modules/.prisma/client"
+}
+
+model Message {
+  id                   String    @id @default(uuid())
+  channelId            String? // Now optional, for DMs
+  directMessageGroupId String? // New, for DMs
+  authorId             String? // Nullable: shows "[Deleted User]" when author is deleted
+  sentAt               DateTime  @default(now())
+  editedAt             DateTime?
+  deletedAt            DateTime?
+  pendingAttachments   Int?      @default(0) // Count of files currently uploading
+  searchText           String? // Flattened text from spans for searching
+
+  // Pinning fields
+  pinned   Boolean   @default(false)
+  pinnedAt DateTime?
+  pinnedBy String?
+
+  // Moderation fields (for soft delete by mods)
+  deletedBy       String? // Who deleted the message (null if author)
+  deletedByReason String? // Reason for mod deletion
+
+  // Threading fields
+  parentMessageId String? // If set, this is a thread reply
+  replyCount      Int       @default(0) // Number of replies (only on parent messages)
+  lastReplyAt     DateTime? // When the last reply was added
+
+  // Inline reply (quote) reference
+  replyToId String? // If set, this message quotes another message
+
+  // Link preview metadata (fetched asynchronously after message creation)
+  linkPreviews Json? // [{url, title, description, imageUrl, siteName, faviconUrl}]
+
+  // Incoming webhook attribution (set instead of authorId for webhook-posted messages)
+  webhookId String?
+
+  // Relations (composite types → proper tables)
+  spans       MessageSpan[]
+  reactions   MessageReaction[]
+  attachments MessageAttachment[]
+
+  channel            Channel?            @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  directMessageGroup DirectMessageGroup? @relation("DirectMessageGroupMessages", fields: [directMessageGroupId], references: [id], onDelete: Cascade)
+  author             User?               @relation("MessageAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  webhook            Webhook?            @relation(fields: [webhookId], references: [id], onDelete: SetNull)
+  pinnedByUser       User?               @relation("MessagePinner", fields: [pinnedBy], references: [id], onDelete: SetNull)
+  deletedByUser      User?               @relation("MessageDeleter", fields: [deletedBy], references: [id], onDelete: SetNull)
+  notifications      Notification[]
+
+  // Thread self-relation
+  parentMessage Message?  @relation("ThreadReplies", fields: [parentMessageId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  threadReplies Message[] @relation("ThreadReplies")
+
+  // Inline reply (quote) self-relation
+  replyToMessage Message?  @relation("InlineReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  inlineReplies  Message[] @relation("InlineReplies")
+
+  // Thread subscribers
+  threadSubscribers ThreadSubscriber[] @relation("MessageThreadSubscribers")
+
+  // Back-references
+  moderationLogs             ModerationLog[] @relation("LogTargetMessage")
+  readReceipts               ReadReceipt[]   @relation("ReadReceiptLastMessage")
+  parentMessageNotifications Notification[]  @relation("NotificationParentMessage")
+  resourceFiles              File[]          @relation("FileResourceMessage")
+
+  @@index([channelId, sentAt]) // Primary message loading (cursor pagination)
+  @@index([channelId, authorId, sentAt]) // Slowmode check
+  @@index([directMessageGroupId, sentAt]) // DM message loading (cursor pagination)
+  @@index([channelId, pinned]) // For fetching pinned messages in a channel
+  @@index([parentMessageId]) // For fetching thread replies
+  @@index([replyToId]) // For fetching inline replies
+  @@index([authorId]) // Author-based lookups
+}
+
+model MessageSpan {
+  id          String   @id @default(uuid())
+  messageId   String
+  position    Int // ordering within the message
+  type        SpanType
+  text        String?
+  userId      String? // For USER_MENTION
+  specialKind String? // For SPECIAL_MENTION: "here", "channel"
+  communityId String? // For COMMUNITY_MENTION
+  channelId   String? // For CHANNEL_MENTION (text is always null: no name stored)
+  aliasId     String? // For ALIAS_MENTION
+  emojiId     String? // For EMOJI (community custom emoji)
+
+  // Composable inline-formatting flags (PLAINTEXT spans). CODE_BLOCK spans use
+  // the CODE_BLOCK type; `code` marks an inline code run.
+  bold          Boolean? // For PLAINTEXT: bold run
+  italic        Boolean? // For PLAINTEXT: italic run
+  strikethrough Boolean? // For PLAINTEXT: strikethrough run
+  code          Boolean? // For PLAINTEXT: inline `code` run
+
+  message    Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user       User?        @relation("SpanUser", fields: [userId], references: [id], onDelete: SetNull)
+  community  Community?   @relation("SpanCommunity", fields: [communityId], references: [id], onDelete: SetNull)
+  channel    Channel?     @relation("SpanChannel", fields: [channelId], references: [id], onDelete: SetNull)
+  aliasGroup AliasGroup?  @relation("SpanAlias", fields: [aliasId], references: [id], onDelete: SetNull)
+  emoji      CustomEmoji? @relation("SpanEmoji", fields: [emojiId], references: [id], onDelete: SetNull)
+
+  @@index([messageId])
+  @@index([channelId])
+}
+
+model MessageReaction {
+  id        String   @id @default(uuid())
+  messageId String
+  emoji     String
+  userId    String
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation("ReactionUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, emoji, userId])
+  @@index([messageId])
+}
+
+model MessageAttachment {
+  id        String @id @default(uuid())
+  messageId String
+  fileId    String
+  position  Int    @default(0)
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  file    File    @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, fileId])
+  @@index([messageId])
+}
+
+model Webhook {
+  id        String   @id @default(uuid())
+  channelId String
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  name      String
+  avatarUrl String?
+  tokenHash String   @unique
+  createdBy String?
+  creator   User?    @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+
+  messages Message[]
+
+  @@index([channelId])
+}
+
+model ThreadSubscriber {
+  id              String   @id @default(uuid())
+  userId          String
+  parentMessageId String
+  subscribedAt    DateTime @default(now())
+
+  user          User    @relation("UserThreadSubscriptions", fields: [userId], references: [id], onDelete: Cascade)
+  parentMessage Message @relation("MessageThreadSubscribers", fields: [parentMessageId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, parentMessageId])
+  @@index([parentMessageId]) // For fetching all subscribers of a thread
+  @@index([userId]) // For fetching all threads a user is subscribed to
+}
+
+model ReadReceipt {
+  id                   String   @id @default(uuid())
+  userId               String
+  channelId            String? // For channel messages
+  directMessageGroupId String? // For DM messages
+  lastReadMessageId    String // Watermark - last message the user has read
+  lastReadAt           DateTime @default(now())
+
+  user               User?               @relation("UserReadReceipts", fields: [userId], references: [id], onDelete: Cascade)
+  channel            Channel?            @relation("ChannelReadReceipts", fields: [channelId], references: [id], onDelete: Cascade)
+  directMessageGroup DirectMessageGroup? @relation("DirectMessageGroupReadReceipts", fields: [directMessageGroupId], references: [id], onDelete: Cascade)
+  lastReadMessage    Message             @relation("ReadReceiptLastMessage", fields: [lastReadMessageId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, channelId])
+  @@unique([userId, directMessageGroupId])
+  @@index([userId, channelId])
+  @@index([userId, directMessageGroupId])
+  @@index([userId]) // For fetching all read receipts for a user
+  @@index([channelId]) // For channel-specific queries
+  @@index([directMessageGroupId]) // For DM-specific queries
+}
+
+model Notification {
+  id                   String           @id @default(uuid())
+  userId               String
+  type                 NotificationType
+  messageId            String?
+  channelId            String?
+  directMessageGroupId String?
+  authorId             String // Who triggered the notification
+  parentMessageId      String? // For thread reply notifications
+  read                 Boolean          @default(false)
+  dismissed            Boolean          @default(false)
+  createdAt            DateTime         @default(now())
+
+  user               User                @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  message            Message?            @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  author             User                @relation("NotificationAuthors", fields: [authorId], references: [id], onDelete: Cascade)
+  channel            Channel?            @relation("ChannelNotifications", fields: [channelId], references: [id], onDelete: Cascade)
+  parentMessage      Message?            @relation("NotificationParentMessage", fields: [parentMessageId], references: [id], onDelete: SetNull)
+  directMessageGroup DirectMessageGroup? @relation("NotificationDMGroup", fields: [directMessageGroupId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read]) // Fast query for unread notifications
+  @@index([userId, createdAt]) // For notification history with pagination
+}
+
+model UserNotificationSettings {
+  id                  String   @id @default(uuid())
+  userId              String   @unique
+  desktopEnabled      Boolean  @default(true)
+  playSound           Boolean  @default(true)
+  soundType           String   @default("default") // "default", "mention", "dm"
+  doNotDisturb        Boolean  @default(false)
+  dndStartTime        String? // "22:00" - 24-hour format
+  dndEndTime          String? // "08:00" - 24-hour format
+  dndTimezone         String? // IANA timezone (e.g. "Europe/Berlin"); set from the client on save
+  defaultChannelLevel String   @default("mentions") // 'all' | 'mentions' | 'none'
+  dmNotifications     Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user User @relation("UserNotificationSettings", fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UserAppearanceSettings {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  themeMode   String   @default("dark") // "dark" | "light"
+  accentColor String   @default("blue") // "teal" | "purple" | "orange" | "blue"
+  intensity   String   @default("minimal") // "minimal" | "balanced" | "vibrant"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation("UserAppearanceSettings", fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ChannelNotificationOverride {
+  id        String   @id @default(uuid())
+  userId    String
+  channelId String
+  level     String // 'all' | 'mentions' | 'none'
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user    User    @relation("ChannelNotificationOverrides", fields: [userId], references: [id], onDelete: Cascade)
+  channel Channel @relation("ChannelNotificationOverrides", fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, channelId])
+  @@index([userId]) // Fast lookup for user's overrides
+}
+
+model User {
+  id             String       @id @default(uuid())
+  username       String       @unique
+  email          String?      @unique
+  verified       Boolean      @default(false)
+  hashedPassword String
+  memberships    Membership[] @relation("UserMemberships")
+  role           InstanceRole @default(USER)
+  createdAt      DateTime     @default(now())
+  avatarUrl      String?
+  bannerUrl      String?
+  lastSeen       DateTime?
+  displayName    String?
+
+  // Profile fields
+  bio             String? // User biography/about text (max 500 chars)
+  status          String? // Custom status message (max 128 chars)
+  statusUpdatedAt DateTime? // When status was last updated
+
+  // Storage quota (in bytes)
+  storageQuotaBytes BigInt @default(53687091200) // 50GB default
+  storageUsedBytes  BigInt @default(0) // Cached total usage
+
+  // Blocking relations
+  blockedUsers   UserBlock[] @relation("BlockerUser")
+  blockedByUsers UserBlock[] @relation("BlockedUser")
+
+  // Ban status
+  banned      Boolean   @default(false)
+  bannedAt    DateTime?
+  bannedById  String?
+  bannedBy    User?     @relation("BannedByUser", fields: [bannedById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  bannedUsers User[]    @relation("BannedByUser")
+
+  // Avatar/banner FK relations
+  avatarFile File? @relation("UserAvatar", fields: [avatarUrl], references: [id], onDelete: SetNull)
+  bannerFile File? @relation("UserBanner", fields: [bannerUrl], references: [id], onDelete: SetNull)
+
+  InstanceInvite InstanceInvite[]
+
+  UserRoles UserRoles[]
+
+  RefreshToken RefreshToken[]
+
+  passwordResetTokens PasswordResetToken[]
+
+  directMessageGroupMemberships DirectMessageGroupMember[]
+  friendshipsA                  Friendship[]               @relation("FriendshipA")
+  friendshipsB                  Friendship[]               @relation("FriendshipB")
+
+  ChannelMembership ChannelMembership[] @relation("UserChannelMemberships")
+  channelOverwrites ChannelPermissionOverwrite[] @relation("UserChannelOverwrites")
+  File              File[]
+  ReadReceipts      ReadReceipt[]       @relation("UserReadReceipts")
+
+  // Notification relations
+  notifications                Notification[]                @relation("UserNotifications")
+  authoredNotifications        Notification[]                @relation("NotificationAuthors")
+  notificationSettings         UserNotificationSettings?     @relation("UserNotificationSettings")
+  channelNotificationOverrides ChannelNotificationOverride[] @relation("ChannelNotificationOverrides")
+
+  // Appearance settings
+  appearanceSettings UserAppearanceSettings? @relation("UserAppearanceSettings")
+
+  // Replay buffer relations
+  egressSessions EgressSession[]
+  replayClips    ReplayClip[]
+
+  // Soundboard sounds uploaded by this user
+  soundboardSounds SoundboardSound[] @relation("SoundboardSoundCreator")
+
+  // Push notification subscriptions
+  pushSubscriptions PushSubscription[] @relation("UserPushSubscriptions")
+
+  // Thread subscriptions
+  threadSubscriptions ThreadSubscriber[] @relation("UserThreadSubscriptions")
+
+  // Alias group memberships
+  aliasGroupMemberships AliasGroupMember[]
+
+  // FK back-references
+  authoredMessages          Message[]             @relation("MessageAuthor")
+  pinnedMessages            Message[]             @relation("MessagePinner")
+  deletedMessages           Message[]             @relation("MessageDeleter")
+  createdWebhooks           Webhook[]
+  mentionSpans              MessageSpan[]         @relation("SpanUser")
+  addedChannelMemberships   ChannelMembership[]   @relation("ChannelMembershipAddedBy")
+  moderatorLogs             ModerationLog[]       @relation("LogModerator")
+  targetOfLogs              ModerationLog[]       @relation("LogTargetUser")
+  messageReactions          MessageReaction[]     @relation("ReactionUser")
+  communityBansReceived     CommunityBan[]        @relation("BannedUser")
+  communityBansMade         CommunityBan[]        @relation("BanModerator")
+  communityTimeoutsReceived CommunityTimeout[]    @relation("TimedOutUser")
+  communityTimeoutsMade     CommunityTimeout[]    @relation("TimeoutModerator")
+  instanceInviteUsages      InstanceInviteUsage[] @relation("InviteUsageUser")
+  resourceFiles             File[]                @relation("FileResourceUser")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Session/device tracking
+  deviceName String? // User-friendly name (e.g., "Chrome on Windows")
+  userAgent  String? // Full user agent string
+  ipAddress  String? // Client IP address
+  lastUsedAt DateTime @default(now()) // Last activity with this token
+  // The client install's random id (X-Device-Id): a new sign-in replaces
+  // the sessions with the same one. Null for clients that don't send one.
+  deviceId   String?
+
+  // Token family for reuse detection (RFC 9700 best practice)
+  // All tokens from a single login share a familyId. On rotation the old
+  // token is marked consumed rather than deleted. If a consumed token is
+  // presented again, the entire family is invalidated.
+  familyId   String?
+  consumed   Boolean   @default(false)
+  consumedAt DateTime?
+
+  @@index([userId, lastUsedAt]) // For fetching user's sessions sorted by activity
+  @@index([familyId]) // For invalidating entire token family on reuse
+  @@index([userId, deviceId]) // For replacing an install's sessions on sign-in
+}
+
+model InstanceInvite {
+  id          String    @id @default(uuid())
+  code        String    @unique
+  createdById String?
+  createdBy   User?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  maxUses     Int?
+  uses        Int       @default(0)
+  validUntil  DateTime?
+  createdAt   DateTime  @default(now())
+  disabled    Boolean   @default(false)
+
+  // Junction tables replacing embedded arrays
+  usages             InstanceInviteUsage[]
+  defaultCommunities InstanceInviteDefaultCommunity[]
+}
+
+model InstanceInviteUsage {
+  id       String   @id @default(uuid())
+  inviteId String
+  userId   String
+  usedAt   DateTime @default(now())
+
+  invite InstanceInvite @relation(fields: [inviteId], references: [id], onDelete: Cascade)
+  user   User           @relation("InviteUsageUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([inviteId, userId])
+  @@index([inviteId])
+}
+
+model InstanceInviteDefaultCommunity {
+  id          String @id @default(uuid())
+  inviteId    String
+  communityId String
+
+  invite    InstanceInvite @relation(fields: [inviteId], references: [id], onDelete: Cascade)
+  community Community      @relation(fields: [communityId], references: [id], onDelete: Cascade)
+
+  @@unique([inviteId, communityId])
+  @@index([inviteId])
+}
+
+model InstanceSettings {
+  id               String           @id @default(uuid())
+  name             String           @default("Semaphore Chat")
+  description      String?
+  registrationMode RegistrationMode @default(INVITE_ONLY)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  // Storage settings
+  defaultStorageQuotaBytes BigInt @default(53687091200) // 50GB default for new users
+  maxFileSizeBytes         BigInt @default(524288000) // 500MB max per file
+
+  // VAPID keys for push notifications (auto-generated if not set via env vars)
+  vapidPublicKey  String?
+  vapidPrivateKey String?
+  vapidSubject    String?
+}
+
+enum RegistrationMode {
+  OPEN // Anyone can register
+  INVITE_ONLY // Requires an invite code
+  CLOSED // Registration disabled
+}
+
+model Membership {
+  id          String    @id @default(uuid())
+  user        User      @relation("UserMemberships", fields: [userId], references: [id], onDelete: Cascade)
+  community   Community @relation("CommunityMemberships", fields: [communityId], references: [id], onDelete: Cascade)
+  joinedAt    DateTime  @default(now())
+  userId      String
+  communityId String
+
+  @@unique([userId, communityId])
+  // Supports findAllForCommunity's cursor-paginated page query
+  // (where: communityId, orderBy: [joinedAt, id]).
+  @@index([communityId, joinedAt, id])
+}
+
+model Community {
+  id          String       @id @default(uuid())
+  name        String
+  memberships Membership[] @relation("CommunityMemberships")
+  channels    Channel[]
+  createdAt   DateTime     @default(now())
+  avatar      String?
+  banner      String?
+  description String?
+  UserRoles   UserRoles[]
+  roles       Role[]
+
+  // Avatar/banner FK relations
+  avatarFile File? @relation("CommunityAvatar", fields: [avatar], references: [id], onDelete: SetNull)
+  bannerFile File? @relation("CommunityBanner", fields: [banner], references: [id], onDelete: SetNull)
+
+  // Moderation relations
+  bans           CommunityBan[]     @relation("CommunityBans")
+  timeouts       CommunityTimeout[] @relation("CommunityTimeouts")
+  moderationLogs ModerationLog[]    @relation("ModerationLogs")
+
+  // Instance invite defaults
+  instanceInviteDefaults InstanceInviteDefaultCommunity[]
+
+  // FK back-references
+  mentionSpans  MessageSpan[] @relation("SpanCommunity")
+  aliasGroups   AliasGroup[]  @relation("AliasGroupCommunity")
+  resourceFiles File[]        @relation("FileResourceCommunity")
+  customEmojis  CustomEmoji[] @relation("CommunityCustomEmojis")
+
+  soundboardSounds SoundboardSound[] @relation("SoundboardSoundCommunity")
+
+  @@unique([name])
+}
+
+model CustomEmoji {
+  id          String   @id @default(uuid())
+  communityId String
+  name        String // shortcode (without colons), e.g. "party_blob"
+  fileId      String
+  createdBy   String? // userId of the creator (audit only, no FK)
+  createdAt   DateTime @default(now())
+
+  community Community     @relation("CommunityCustomEmojis", fields: [communityId], references: [id], onDelete: Cascade)
+  file      File          @relation("CustomEmojiFile", fields: [fileId], references: [id], onDelete: Cascade)
+  spans     MessageSpan[] @relation("SpanEmoji")
+
+  @@unique([communityId, name])
+  @@index([communityId])
+}
+
+model Channel {
+  id                    String                        @id @default(uuid())
+  name                  String
+  communityId           String
+  community             Community?                    @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  createdAt             DateTime                      @default(now())
+  type                  ChannelType                   @default(TEXT)
+  position              Int                           @default(0)
+  slowmodeSeconds       Int                           @default(0) // 0 = disabled, >0 = seconds between messages
+  Message               Message[]
+  ChannelMembership     ChannelMembership[]           @relation("ChannelMembership")
+  isPrivate             Boolean                       @default(false)
+  ReadReceipts          ReadReceipt[]                 @relation("ChannelReadReceipts")
+  notificationOverrides ChannelNotificationOverride[] @relation("ChannelNotificationOverrides")
+  notifications         Notification[]                @relation("ChannelNotifications")
+
+  // FK back-references
+  replayClips    ReplayClip[]    @relation("ReplayClipChannel")
+  egressSessions EgressSession[] @relation("EgressSessionChannel")
+  webhooks       Webhook[]
+  mentionSpans   MessageSpan[]   @relation("SpanChannel")
+
+  // Per-channel permission overwrites (allow/deny on top of community roles).
+  // `preset` is a display label for the settings UI only; enforcement reads
+  // the overwrites.
+  preset     ChannelPreset                @default(NORMAL)
+  overwrites ChannelPermissionOverwrite[] @relation("ChannelOverwrites")
+
+  @@unique([communityId, name])
+  @@index([communityId, type, position])
+}
+
+model ChannelMembership {
+  id        String   @id @default(uuid())
+  user      User     @relation("UserChannelMemberships", fields: [userId], references: [id], onDelete: Cascade)
+  channel   Channel  @relation("ChannelMembership", fields: [channelId], references: [id], onDelete: Cascade)
+  joinedAt  DateTime @default(now())
+  userId    String
+  channelId String
+  addedBy   String? // Who added this user (for private channels)
+
+  addedByUser User? @relation("ChannelMembershipAddedBy", fields: [addedBy], references: [id], onDelete: SetNull)
+
+  @@unique([userId, channelId])
+}
+
+/// A per-channel allow/deny of channel-scoped actions for one target.
+/// Exactly one overwrite per (channel, EVERYONE), (channel, role) and
+/// (channel, member): partial unique indexes and CHECK constraints are in the
+/// migration's raw SQL. MEMBER targets are in the data model only (no API yet).
+model ChannelPermissionOverwrite {
+  id         String          @id @default(uuid())
+  channelId  String
+  targetType OverwriteTarget
+  roleId     String?
+  userId     String?
+  allow      RbacActions[]   @default([])
+  deny       RbacActions[]   @default([])
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  channel Channel @relation("ChannelOverwrites", fields: [channelId], references: [id], onDelete: Cascade)
+  role    Role?   @relation("RoleChannelOverwrites", fields: [roleId], references: [id], onDelete: Cascade)
+  user    User?   @relation("UserChannelOverwrites", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([channelId])
+  @@index([roleId])
+  @@index([userId])
+}
+
+model AliasGroup {
+  id          String             @id @default(uuid())
+  name        String
+  communityId String
+  members     AliasGroupMember[]
+  createdAt   DateTime           @default(now())
+
+  community    Community     @relation("AliasGroupCommunity", fields: [communityId], references: [id], onDelete: Cascade)
+  mentionSpans MessageSpan[] @relation("SpanAlias")
+
+  @@unique([communityId, name])
+}
+
+model AliasGroupMember {
+  id           String      @id @default(uuid())
+  aliasGroupId String
+  userId       String
+  aliasGroup   AliasGroup? @relation(fields: [aliasGroupId], references: [id], onDelete: Cascade)
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([aliasGroupId, userId])
+}
+
+model Role {
+  id          String        @id @default(uuid())
+  name        String
+  communityId String?
+  community   Community?    @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  isDefault   Boolean       @default(false)
+  position    Int           @default(50)
+  actions     RbacActions[] @default([])
+  createdAt   DateTime      @default(now())
+
+  UserRoles UserRoles[]
+
+  channelOverwrites ChannelPermissionOverwrite[] @relation("RoleChannelOverwrites")
+
+  @@index([name, communityId])
+}
+
+model UserRoles {
+  id             String     @id @default(uuid())
+  // This is the same relationship as Membership, but it simplifies the auth lookup since our token only has the userId
+  userId         String
+  communityId    String?
+  roleId         String
+  isInstanceRole Boolean    @default(false)
+  user           User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  community      Community? @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  role           Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, communityId, roleId])
+}
+
+model DirectMessageGroup {
+  id           String                     @id @default(uuid())
+  name         String? // Optional, for group DMs
+  members      DirectMessageGroupMember[]
+  createdAt    DateTime                   @default(now())
+  messages     Message[]                  @relation("DirectMessageGroupMessages")
+  isGroup      Boolean                    @default(false) // true for group DMs, false for 1:1
+  ReadReceipts ReadReceipt[]              @relation("DirectMessageGroupReadReceipts")
+
+  // FK back-references
+  notifications Notification[] @relation("NotificationDMGroup")
+}
+
+model DirectMessageGroupMember {
+  id       String             @id @default(uuid())
+  groupId  String
+  userId   String
+  group    DirectMessageGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user     User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt DateTime           @default(now())
+
+  @@unique([groupId, userId])
+  @@index([userId]) // For loading DM groups by user
+}
+
+model Friendship {
+  id        String           @id @default(uuid())
+  userAId   String
+  userBId   String
+  createdAt DateTime         @default(now())
+  status    FriendshipStatus @default(PENDING)
+  userA     User             @relation("FriendshipA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB     User             @relation("FriendshipB", fields: [userBId], references: [id], onDelete: Cascade)
+
+  @@unique([userAId, userBId])
+  @@index([userBId]) // For OR-clause friend lookup
+}
+
+model UserBlock {
+  id        String   @id @default(uuid())
+  blockerId String // User doing the blocking
+  blockedId String // User being blocked
+  createdAt DateTime @default(now())
+  blocker   User     @relation("BlockerUser", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked   User     @relation("BlockedUser", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@index([blockerId])
+  @@index([blockedId])
+}
+
+model File {
+  id           String       @id @default(uuid())
+  filename     String // Original filename
+  mimeType     String // MIME type (image/jpeg, etc.)
+  fileType     FileType // Enum for different file types
+  size         Int // File size in bytes
+  checksum     String // SHA-256 hash for integrity
+  uploadedBy   User?        @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  uploadedById String?
+  uploadedAt   DateTime     @default(now())
+  deletedAt    DateTime? // Soft delete
+  resourceType ResourceType
+
+  // Typed FK columns (replaces polymorphic resourceId)
+  fileUserId      String? // USER_AVATAR, USER_BANNER, REPLAY_CLIP
+  fileCommunityId String? // COMMUNITY_AVATAR, COMMUNITY_BANNER, CUSTOM_EMOJI
+  fileMessageId   String? // MESSAGE_ATTACHMENT
+
+  // Storage configuration
+  storageType   StorageType @default(LOCAL)
+  storagePath   String // Local path or cloud key
+  thumbnailPath String? // Path to generated thumbnail image (for videos)
+
+  // Typed FK relations
+  resourceUser      User?      @relation("FileResourceUser", fields: [fileUserId], references: [id], onDelete: Cascade)
+  resourceCommunity Community? @relation("FileResourceCommunity", fields: [fileCommunityId], references: [id], onDelete: Cascade)
+  resourceMessage   Message?   @relation("FileResourceMessage", fields: [fileMessageId], references: [id], onDelete: Cascade)
+
+  // Relations
+  replayClips        ReplayClip[]
+  messageAttachments MessageAttachment[]
+  customEmojis       CustomEmoji[]       @relation("CustomEmojiFile")
+  soundboardSounds   SoundboardSound[]
+
+  // Avatar/banner back-references
+  userAvatars      User[]      @relation("UserAvatar")
+  userBanners      User[]      @relation("UserBanner")
+  communityAvatars Community[] @relation("CommunityAvatar")
+  communityBanners Community[] @relation("CommunityBanner")
+
+  @@index([uploadedById]) // show my files or files for specific user
+  @@index([deletedAt]) // For cleaning up deleted files
+  @@index([fileUserId]) // For fetching files related to a user
+  @@index([fileCommunityId]) // For fetching files related to a community
+  @@index([fileMessageId]) // For fetching files related to a message
+}
+
+model EgressSession {
+  id          String    @id @default(uuid())
+  egressId    String    @unique // LiveKit egress ID
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roomName    String // LiveKit room name (channel ID)
+  channelId   String // Voice channel ID
+  segmentPath String // Path to segments (for cleanup)
+  status      String // "active", "stopped", "failed"
+  error       String? // Error message if egress failed
+  startedAt   DateTime
+  endedAt     DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  channel Channel @relation("EgressSessionChannel", fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([status, createdAt])
+}
+
+model ReplayClip {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fileId          String
+  file            File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  channelId       String? // Optional: which channel it was captured from
+  durationSeconds Int // Duration of the clip in seconds
+  isPublic        Boolean  @default(false) // Show on user's public profile
+  capturedAt      DateTime @default(now())
+
+  channel Channel? @relation("ReplayClipChannel", fields: [channelId], references: [id], onDelete: SetNull)
+
+  @@index([userId, capturedAt])
+}
+
+model SoundboardSound {
+  id          String   @id @default(uuid())
+  communityId String
+  community   Community @relation("SoundboardSoundCommunity", fields: [communityId], references: [id], onDelete: Cascade)
+  name        String
+  emoji       String? // Optional emoji shown on the sound button
+  fileId      String
+  file        File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  createdBy   String? // User who uploaded the sound (SetNull when user deleted)
+  creator     User?    @relation("SoundboardSoundCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+
+  @@unique([communityId, name])
+  @@index([communityId])
+}
+
+model CommunityBan {
+  id          String    @id @default(uuid())
+  communityId String
+  userId      String
+  moderatorId String? // Nullable: SetNull when moderator is deleted
+  reason      String?
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime? // null = permanent ban
+  active      Boolean   @default(true)
+
+  community Community @relation("CommunityBans", fields: [communityId], references: [id], onDelete: Cascade)
+  user      User      @relation("BannedUser", fields: [userId], references: [id], onDelete: Cascade)
+  moderator User?     @relation("BanModerator", fields: [moderatorId], references: [id], onDelete: SetNull)
+
+  @@unique([communityId, userId])
+  @@index([communityId, active])
+}
+
+model CommunityTimeout {
+  id          String   @id @default(uuid())
+  communityId String
+  userId      String
+  moderatorId String? // Nullable: SetNull when moderator is deleted
+  reason      String?
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime // Required - timeouts are always temporary
+
+  community Community @relation("CommunityTimeouts", fields: [communityId], references: [id], onDelete: Cascade)
+  user      User      @relation("TimedOutUser", fields: [userId], references: [id], onDelete: Cascade)
+  moderator User?     @relation("TimeoutModerator", fields: [moderatorId], references: [id], onDelete: SetNull)
+
+  @@unique([communityId, userId])
+  @@index([communityId, expiresAt])
+}
+
+model ModerationLog {
+  id              String           @id @default(uuid())
+  communityId     String
+  moderatorId     String? // Nullable: SetNull when moderator is deleted
+  targetUserId    String?
+  targetMessageId String?
+  action          ModerationAction
+  reason          String?
+  metadata        Json?
+  createdAt       DateTime         @default(now())
+
+  community     Community @relation("ModerationLogs", fields: [communityId], references: [id], onDelete: Cascade)
+  moderator     User?     @relation("LogModerator", fields: [moderatorId], references: [id], onDelete: SetNull)
+  targetUser    User?     @relation("LogTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
+  targetMessage Message?  @relation("LogTargetMessage", fields: [targetMessageId], references: [id], onDelete: SetNull)
+
+  @@index([communityId, createdAt])
+}
+
+enum FileType {
+  IMAGE
+  VIDEO
+  AUDIO
+  DOCUMENT
+  OTHER
+}
+
+enum ResourceType {
+  USER_AVATAR
+  USER_BANNER
+  COMMUNITY_BANNER
+  COMMUNITY_AVATAR
+  MESSAGE_ATTACHMENT
+  CUSTOM_EMOJI
+  REPLAY_CLIP
+  SOUNDBOARD_SOUND
+}
+
+enum StorageType {
+  LOCAL
+  S3
+  AZURE_BLOB
+}
+
+enum FriendshipStatus {
+  PENDING
+  ACCEPTED
+  BLOCKED
+}
+
+enum ChannelType {
+  TEXT
+  VOICE
+}
+
+enum OverwriteTarget {
+  EVERYONE
+  ROLE
+  MEMBER
+}
+
+enum ChannelPreset {
+  NORMAL
+  READ_ONLY
+  ANNOUNCEMENT
+  MODS_ONLY
+  CUSTOM
+}
+
+enum RbacActions {
+  DELETE_MESSAGE
+  DELETE_CHANNEL
+  DELETE_COMMUNITY
+  DELETE_INVITE
+  DELETE_USER
+  DELETE_ROLE
+  DELETE_ALIAS_GROUP
+  DELETE_ALIAS_GROUP_MEMBER
+  DELETE_INSTANCE_INVITE
+  DELETE_MEMBER
+  DELETE_REACTION
+  CREATE_MESSAGE
+  CREATE_CHANNEL
+  CREATE_COMMUNITY
+  CREATE_INVITE
+  CREATE_ROLE
+  CREATE_ALIAS_GROUP
+  CREATE_ALIAS_GROUP_MEMBER
+  CREATE_INSTANCE_INVITE
+  CREATE_MEMBER
+  CREATE_REACTION
+  JOIN_CHANNEL
+  READ_MESSAGE
+  READ_CHANNEL
+  READ_COMMUNITY
+  READ_ALL_COMMUNITIES
+  READ_USER
+  READ_ROLE
+  READ_ALIAS_GROUP
+  READ_ALIAS_GROUP_MEMBER
+  READ_INSTANCE_INVITE
+  READ_MEMBER
+  UPDATE_COMMUNITY
+  UPDATE_CHANNEL
+  UPDATE_USER
+  UPDATE_ROLE
+  UPDATE_ALIAS_GROUP
+  UPDATE_ALIAS_GROUP_MEMBER
+  UPDATE_INSTANCE_INVITE
+  UPDATE_MEMBER
+  CAPTURE_REPLAY
+  READ_INSTANCE_SETTINGS
+  UPDATE_INSTANCE_SETTINGS
+  READ_INSTANCE_STATS
+  MANAGE_USER_STORAGE
+  BAN_USER
+  KICK_USER
+  TIMEOUT_USER
+  UNBAN_USER
+  PIN_MESSAGE
+  UNPIN_MESSAGE
+  DELETE_ANY_MESSAGE
+  VIEW_BAN_LIST
+  VIEW_MODERATION_LOGS
+  MUTE_PARTICIPANT
+  MANAGE_EMOJIS
+  CREATE_SOUNDBOARD_SOUND
+  DELETE_SOUNDBOARD_SOUND
+  READ_SOUNDBOARD_SOUND
+  ATTACH_FILES
+  SPEAK
+  VIDEO
+  SCREEN_SHARE
+  MANAGE_CHANNEL_PERMISSIONS
+  MANAGE_WEBHOOKS
+}
+
+enum InstanceRole {
+  OWNER
+  USER
+}
+
+enum ModerationAction {
+  BAN_USER
+  UNBAN_USER
+  KICK_USER
+  TIMEOUT_USER
+  REMOVE_TIMEOUT
+  DELETE_MESSAGE
+  PIN_MESSAGE
+  UNPIN_MESSAGE
+}
+
+enum NotificationType {
+  USER_MENTION
+  SPECIAL_MENTION
+  DIRECT_MESSAGE
+  CHANNEL_MESSAGE
+  THREAD_REPLY
+}
+
+model PushSubscription {
+  id        String   @id @default(uuid())
+  userId    String
+  endpoint  String   @unique
+  keys      Json // { p256dh, auth }
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation("UserPushSubscriptions", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+enum SpanType {
+  PLAINTEXT
+  USER_MENTION
+  SPECIAL_MENTION
+  COMMUNITY_MENTION
+  ALIAS_MENTION
+  CHANNEL_MENTION
+  CODE_BLOCK
+  EMOJI
+}
