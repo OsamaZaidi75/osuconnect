@@ -55,6 +55,26 @@ describe('InviteController', () => {
         10,
         createDto.validUntil,
         ['community-1', 'community-2'],
+        undefined,
+      );
+    });
+
+    it('should pass a custom code through to the service', async () => {
+      const mockUser = { id: 'user-123', username: 'testuser' };
+      const mockReq = { user: mockUser } as any;
+      service.createInvite.mockResolvedValue({ code: 'my-code' } as any);
+
+      await controller.createInvite(mockReq, {
+        code: 'my-code',
+        communityIds: [],
+      });
+
+      expect(service.createInvite).toHaveBeenCalledWith(
+        mockUser,
+        undefined,
+        undefined,
+        [],
+        'my-code',
       );
     });
   });

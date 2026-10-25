@@ -12,9 +12,13 @@ function upload(storage: TieredDiskStorage, content = 'hello'): Promise<Info> {
   } as unknown as Express.Multer.File;
   const req = { headers: { 'content-length': String(content.length) } };
   return new Promise((resolve, reject) => {
-    storage._handleFile(req as never, file, (error, info) =>
-      error ? reject(error as Error) : resolve(info as Info),
-    );
+    storage._handleFile(req as never, file, (error, info) => {
+      if (error) {
+        reject(error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
+      resolve(info as Info);
+    });
   });
 }
 
