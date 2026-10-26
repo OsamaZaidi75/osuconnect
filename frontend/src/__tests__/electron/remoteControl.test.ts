@@ -4,6 +4,7 @@ import {
   domCodeToKey,
   mapNormalizedPoint,
   parseInputEvent,
+  scrollUnitsPerTick,
   wheelToTicks,
   MAX_EVENTS_PER_SECOND,
   type Bounds,
@@ -105,6 +106,14 @@ describe('mapNormalizedPoint', () => {
 
   it('handles a one-pixel display', () => {
     expect(mapNormalizedPoint(0.5, 0.5, { x: 7, y: 9, width: 1, height: 1 })).toEqual({ x: 7, y: 9 });
+  });
+});
+
+describe('scrollUnitsPerTick', () => {
+  it('uses WHEEL_DELTA on Windows, pixels on macOS and clicks on Linux', () => {
+    expect(scrollUnitsPerTick('win32')).toBe(120);
+    expect(scrollUnitsPerTick('darwin')).toBe(40);
+    expect(scrollUnitsPerTick('linux')).toBe(1);
   });
 });
 

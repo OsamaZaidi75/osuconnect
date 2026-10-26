@@ -137,12 +137,12 @@ jobs:
         shell: pwsh
         run: |
           $env:ELECTRON_SMOKE = '1'
-          $p = Start-Process -FilePath "release\win-unpacked\Semaphore Chat.exe" `
+          $p = Start-Process -FilePath "release\win-unpacked\OsuConnect.exe" `
             -RedirectStandardOutput smoke-out.log -RedirectStandardError smoke-err.log -PassThru
           if (-not $p.WaitForExit(60000)) {
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
           }
-          Get-Process -Name "Semaphore Chat" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Get-Process -Name "OsuConnect" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           $out = (Get-Content smoke-out.log -Raw -ErrorAction SilentlyContinue) + "`n" + (Get-Content smoke-err.log -Raw -ErrorAction SilentlyContinue)
           Write-Host $out
           if ($out -notmatch 'ELECTRON_SMOKE_OK') {
@@ -154,14 +154,14 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: windows-installer
-          path: frontend/release/Semaphore-Chat-Setup-*.exe
+          path: frontend/release/OsuConnect-Setup-*.exe
           retention-days: 7
 
       - name: Upload Windows blockmap
         uses: actions/upload-artifact@v7
         with:
           name: windows-blockmap
-          path: frontend/release/Semaphore-Chat-Setup-*.exe.blockmap
+          path: frontend/release/OsuConnect-Setup-*.exe.blockmap
           retention-days: 7
 
       - name: Upload Windows update manifest

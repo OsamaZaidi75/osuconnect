@@ -1,6 +1,6 @@
 {
   "name": "semaphore-chat",
-  "productName": "Semaphore Chat",
+  "productName": "OsuConnect",
   "description": "Self-hosted voice and text chat",
   "main": "electron/dist/main.cjs",
   "private": true,

@@ -2,7 +2,7 @@
 # https://www.electron.build/configuration/configuration
 
 appId: com.semaphorechat.app
-productName: Semaphore Chat
+productName: OsuConnect
 copyright: Copyright © 2025
 
 # Custom URL scheme for deep links (semaphore://community/<id>, .../channel/<id>,
@@ -14,7 +14,7 @@ copyright: Copyright © 2025
 # install, not just `electron-builder --dir` (see PR-14 report for the manual QA
 # steps: `xdg-open semaphore://...` after installing).
 protocols:
-  name: Semaphore Chat
+  name: OsuConnect
   schemes:
     - semaphore
 
@@ -53,7 +53,7 @@ win:
 
 # NSIS installer configuration (Windows)
 nsis:
-  artifactName: Semaphore-Chat-Setup-${version}.${ext}
+  artifactName: OsuConnect-Setup-${version}.${ext}
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
@@ -76,7 +76,7 @@ mac:
   # Electron 39+: desktopCapturer (screen share / loopback audio) requires this
   # usage string on macOS >= 14.2
   extendInfo:
-    NSAudioCaptureUsageDescription: Semaphore Chat captures system audio when you share your screen with sound.
+    NSAudioCaptureUsageDescription: OsuConnect captures system audio when you share your screen with sound.
   # Code signing (requires Apple Developer account)
   # identity: "Developer ID Application: Your Name (TEAM_ID)"
   # hardenedRuntime: true
@@ -124,7 +124,7 @@ linux:
   # electron-builder 26: .desktop keys live under desktop.entry
   desktop:
     entry:
-      Name: Semaphore Chat
+      Name: OsuConnect
       GenericName: Voice Chat Application
       Comment: Self-hosted voice and text chat application
       Categories: Network;InstantMessaging;AudioVideo;

@@ -187,6 +187,17 @@ export function wheelToTicks(dx: number, dy: number): { x: number; y: number } {
   return { x: ticks(dx), y: vertical === 0 ? 0 : -vertical };
 }
 
+/**
+ * The driver's scroll unit differs per OS: Windows takes 1/120ths of a wheel
+ * notch (WHEEL_DELTA), macOS takes pixels, Linux X11 takes button clicks (one
+ * per notch). Multiply notch counts by this before calling the driver.
+ */
+export function scrollUnitsPerTick(platform: string): number {
+  if (platform === 'win32') return 120;
+  if (platform === 'darwin') return 40;
+  return 1;
+}
+
 export interface RemoteControlSessionDeps {
   driver: InputDriver;
   /**

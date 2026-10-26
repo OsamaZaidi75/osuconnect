@@ -1,7 +1,7 @@
 /**
  * Electron Main Process
  *
- * This is the main process for the Semaphore Chat Electron application.
+ * This is the main process for the OsuConnect Electron application.
  * It handles window creation, auto-updates, and IPC communication.
  */
 
@@ -21,7 +21,13 @@ import { BrowserLoginSessions, type BrowserLoginAttempt, type BrowserLoginResult
 import { choosePasswordStore, probeSecretService } from './passwordStore';
 import log from 'electron-log/main';
 import { formatVoiceLogEntry } from './voiceLog';
-import { RemoteControlSession, HELPER_PORT, type Bounds, type InputDriver } from './remote-control';
+import {
+  RemoteControlSession,
+  HELPER_PORT,
+  scrollUnitsPerTick,
+  type Bounds,
+  type InputDriver,
+} from './remote-control';
 import {
   createBridge,
   chooseDisplay,
@@ -233,6 +239,11 @@ let isQuitting = false;
 const isHelperMode = process.argv.includes('--helper');
 if (isHelperMode) {
   app.setPath('userData', path.join(app.getPath('appData'), 'OsuConnect Helper'));
+} else {
+  // The app used to be called "Semaphore Chat"; keep using that settings
+  // folder when it exists so renaming doesn't sign existing users out.
+  const legacyUserData = path.join(app.getPath('appData'), 'Semaphore Chat');
+  if (fs.existsSync(legacyUserData)) app.setPath('userData', legacyUserData);
 }
 
 // ─── Smoke Test Mode (CI PR builds, electron-smoke.yml) ────────────────────
@@ -338,7 +349,7 @@ function rebuildMenus(): void {
 function buildTrayContextMenu(): Electron.Menu {
   return Menu.buildFromTemplate([
     {
-      label: 'Show/Hide Semaphore Chat',
+      label: 'Show/Hide OsuConnect',
       click: () => {
         if (!mainWindow) return;
         if (mainWindow.isVisible()) {
@@ -391,7 +402,7 @@ function setupTray(): void {
   }
 
   tray = new Tray(trayIcon);
-  tray.setToolTip('Semaphore Chat');
+  tray.setToolTip('OsuConnect');
   tray.setContextMenu(buildTrayContextMenu());
 
   // On Linux/Windows, clicking the tray icon toggles window visibility
@@ -496,12 +507,12 @@ function setupApplicationMenu(): void {
       label: 'Help',
       submenu: [
         {
-          label: 'About Semaphore Chat',
+          label: 'About OsuConnect',
           click: () => {
             dialog.showMessageBox({
               type: 'info',
-              title: 'About Semaphore Chat',
-              message: `Semaphore Chat v${app.getVersion()}`,
+              title: 'About OsuConnect',
+              message: `OsuConnect v${app.getVersion()}`,
               detail: 'Self-hosted voice and text chat.',
             });
           },
@@ -985,7 +996,10 @@ const remoteControlSession = new RemoteControlSession({
     moveMouse: (x, y) => inputDriver?.moveMouse(x, y),
     dragMouse: (x, y) => inputDriver?.dragMouse(x, y),
     mouseToggle: (direction, button) => inputDriver?.mouseToggle(direction, button),
-    scrollMouse: (x, y) => inputDriver?.scrollMouse(x, y),
+    scrollMouse: (x, y) => {
+      const unit = scrollUnitsPerTick(process.platform);
+      inputDriver?.scrollMouse(x * unit, y * unit);
+    },
     keyToggle: (key, direction) => inputDriver?.keyToggle(key, direction),
   },
   getTargetBounds: getSharedScreenBounds,

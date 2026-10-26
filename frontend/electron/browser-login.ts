@@ -97,7 +97,7 @@ p{margin:0;opacity:.8;line-height:1.5}
 
 const SUCCESS_PAGE = page(
   'You’re signed in',
-  'Semaphore Chat is signing you in. You can close this tab and go back to the app.',
+  'OsuConnect is signing you in. You can close this tab and go back to the app.',
 );
 const DENIED_PAGE = page(
   'Sign-in cancelled',
@@ -105,7 +105,7 @@ const DENIED_PAGE = page(
 );
 const BAD_REQUEST_PAGE = page(
   'This link doesn’t work',
-  'Start again with “Sign in with browser” in the Semaphore Chat app.',
+  'Start again with “Sign in with browser” in the OsuConnect app.',
 );
 
 /**
