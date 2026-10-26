@@ -509,6 +509,7 @@ describe('CommunityService', () => {
       mockDatabase.threadSubscriber.deleteMany.mockResolvedValue({ count: 0 });
       mockDatabase.channelMembership.deleteMany.mockResolvedValue({ count: 0 });
       mockDatabase.message.deleteMany.mockResolvedValue({ count: 0 });
+      mockDatabase.file.findMany.mockResolvedValue([]);
       mockDatabase.channel.deleteMany.mockResolvedValue({ count: 0 });
       mockDatabase.communityBan.deleteMany.mockResolvedValue({ count: 0 });
       mockDatabase.communityTimeout.deleteMany.mockResolvedValue({ count: 0 });
@@ -535,6 +536,17 @@ describe('CommunityService', () => {
       expect(mockDatabase.threadSubscriber.deleteMany).toHaveBeenCalled();
       expect(mockDatabase.channelMembership.deleteMany).toHaveBeenCalled();
       expect(mockDatabase.message.deleteMany).toHaveBeenCalled();
+
+      // The community's files are handed to the cleanup job before the
+      // cascading message delete would drop their rows
+      const released = mockDatabase.file.findMany.mock.calls[0][0].where;
+      expect(released.AND[0]).toEqual({
+        resourceMessage: { channel: { communityId: community.id } },
+      });
+      const order = (fn: jest.Mock) => fn.mock.invocationCallOrder[0];
+      expect(order(mockDatabase.file.findMany)).toBeLessThan(
+        order(mockDatabase.message.deleteMany),
+      );
       expect(mockDatabase.channel.deleteMany).toHaveBeenCalled();
       expect(mockDatabase.communityBan.deleteMany).toHaveBeenCalled();
       expect(mockDatabase.communityTimeout.deleteMany).toHaveBeenCalled();

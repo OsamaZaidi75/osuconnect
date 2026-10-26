@@ -12,6 +12,7 @@ import { CommunityRolesService } from '@/roles/community-roles.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RoomEvents } from '@/rooms/room-subscription.events';
 import { isPrismaError } from '@/common/utils/prisma.utils';
+import { releaseOwnedFiles } from '@/file/release-owned-files';
 import {
   EpochBump,
   PermissionsCacheService,
@@ -364,6 +365,12 @@ export class CommunityService {
 
       await tx.channelMembership.deleteMany({
         where: { channel: { communityId: id } },
+      });
+
+      // Hand the community's files to the cleanup job before the delete below
+      // cascades their File rows away (which would leak the bytes)
+      await releaseOwnedFiles(tx, {
+        resourceMessage: { channel: { communityId: id } },
       });
 
       await tx.message.deleteMany({

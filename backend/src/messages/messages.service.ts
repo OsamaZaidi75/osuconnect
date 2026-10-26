@@ -10,6 +10,7 @@ import { ChannelAccessService } from '@/roles/channel-access.service';
 import { PermissionsService } from '@/roles/permissions.service';
 import { DatabaseService } from '@/database/database.service';
 import { FileService } from '@/file/file.service';
+import { releaseOwnedFiles } from '@/file/release-owned-files';
 import { flattenSpansToText } from '@/common/utils/text.utils';
 import { sanitizeEmojiSpans } from '@/common/utils/emoji-span.utils';
 import { sanitizeChannelMentionSpans } from '@/common/utils/channel-mention-span.utils';
@@ -388,6 +389,11 @@ export class MessagesService {
           where: { parentMessageId: id },
           include: { attachments: { include: { file: true } } },
         });
+
+        // Hand the messages' own files to the cleanup job before the delete
+        // below cascades their File rows away (which would leak the bytes)
+        const messageIds = [id, ...threadReplies.map((reply) => reply.id)];
+        await releaseOwnedFiles(tx, { fileMessageId: { in: messageIds } });
 
         for (const reply of threadReplies) {
           for (const attachment of reply.attachments) {

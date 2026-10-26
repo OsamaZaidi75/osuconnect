@@ -500,6 +500,7 @@ describe('ChannelsService', () => {
       mockDatabase.webhook.deleteMany.mockResolvedValue({ count: 0 });
       mockDatabase.threadSubscriber.deleteMany.mockResolvedValue({ count: 0 });
       mockDatabase.channelMembership.deleteMany.mockResolvedValue({ count: 0 });
+      mockDatabase.file.findMany.mockResolvedValue([]);
       mockDatabase.message.deleteMany.mockResolvedValue({ count: 0 });
       mockDatabase.channel.delete.mockResolvedValue(channel);
 
@@ -528,6 +529,17 @@ describe('ChannelsService', () => {
       expect(mockDatabase.message.deleteMany).toHaveBeenCalledWith({
         where: { channelId: channel.id },
       });
+
+      // The channel's files are handed to the cleanup job before the message
+      // delete would cascade their rows away
+      const released = mockDatabase.file.findMany.mock.calls[0][0].where;
+      expect(released.AND[0]).toEqual({
+        resourceMessage: { channelId: channel.id },
+      });
+      const order = (fn: jest.Mock) => fn.mock.invocationCallOrder[0];
+      expect(order(mockDatabase.file.findMany)).toBeLessThan(
+        order(mockDatabase.message.deleteMany),
+      );
       expect(mockDatabase.channel.delete).toHaveBeenCalledWith({
         where: { id: channel.id },
       });

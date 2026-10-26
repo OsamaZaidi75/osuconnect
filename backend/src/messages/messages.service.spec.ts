@@ -665,7 +665,8 @@ describe('MessagesService', () => {
 
   describe('remove', () => {
     beforeEach(() => {
-      // Default: no thread replies
+      // Default: no thread replies, no files owned by the messages
+      mockDatabase.file.findMany.mockResolvedValue([]);
       mockDatabase.message.findMany.mockResolvedValue([]);
       mockDatabase.message.deleteMany.mockResolvedValue({ count: 0 });
     });
@@ -811,6 +812,47 @@ describe('MessagesService', () => {
         'reply-file-1',
         expect.any(Object),
       );
+    });
+
+    it("releases the message's own files before the delete cascades their rows away", async () => {
+      const messageId = 'msg-123';
+      mockDatabase.file.findMany.mockResolvedValue([
+        { id: 'file-1', size: 100, uploadedById: 'user-1', deletedAt: null },
+      ]);
+      mockDatabase.message.delete.mockResolvedValue(
+        buildMessageWithIncludes({ id: messageId }),
+      );
+
+      await service.remove(messageId);
+
+      const released = mockDatabase.file.findMany.mock.calls[0][0].where;
+      expect(released.AND[0]).toEqual({ fileMessageId: { in: [messageId] } });
+      expect(mockDatabase.file.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['file-1'] } },
+        data: { fileMessageId: null, deletedAt: expect.any(Date) },
+      });
+      const order = (fn: jest.Mock) => fn.mock.invocationCallOrder[0];
+      expect(order(mockDatabase.file.updateMany)).toBeLessThan(
+        order(mockDatabase.message.delete),
+      );
+    });
+
+    it('releases the files of thread replies as well', async () => {
+      mockDatabase.message.findMany.mockResolvedValue([
+        { id: 'reply-1', parentMessageId: 'parent', attachments: [] },
+        { id: 'reply-2', parentMessageId: 'parent', attachments: [] },
+      ]);
+      mockDatabase.message.deleteMany.mockResolvedValue({ count: 2 });
+      mockDatabase.message.delete.mockResolvedValue(
+        buildMessageWithIncludes({ id: 'parent' }),
+      );
+
+      await service.remove('parent');
+
+      const released = mockDatabase.file.findMany.mock.calls[0][0].where;
+      expect(released.AND[0]).toEqual({
+        fileMessageId: { in: ['parent', 'reply-1', 'reply-2'] },
+      });
     });
 
     it('should not explicitly delete thread subscribers (cascade handles it)', async () => {

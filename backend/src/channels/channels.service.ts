@@ -14,6 +14,7 @@ import { ChannelType, InstanceRole, Prisma, RbacActions } from '@prisma/client';
 import { WebsocketService } from '@/websocket/websocket.service';
 import { Channel as SharedChannel, ServerEvents } from '@semaphore-chat/shared';
 import { isPrismaError } from '@/common/utils/prisma.utils';
+import { releaseOwnedFiles } from '@/file/release-owned-files';
 import { RoomEvents } from '@/rooms/room-subscription.events';
 import { RoomName } from '@/common/utils/room-name.util';
 import { ChannelAccessService } from '@/roles/channel-access.service';
@@ -328,6 +329,10 @@ export class ChannelsService {
       await tx.channelMembership.deleteMany({
         where: { channelId: id },
       });
+
+      // Hand the channel's files to the cleanup job before the delete below
+      // cascades their File rows away (which would leak the bytes)
+      await releaseOwnedFiles(tx, { resourceMessage: { channelId: id } });
 
       await tx.message.deleteMany({
         where: { channelId: id },
