@@ -9,6 +9,7 @@ export type ThemeMode = 'dark' | 'light';
 export type AccentColor =
   | 'teal'
   | 'purple'
+  | 'violet'
   | 'orange'
   | 'blue'
   | 'rose'
@@ -37,6 +38,7 @@ export interface AccentColorInfo {
 export const accentColors: AccentColorInfo[] = [
   { id: 'teal', name: 'Ocean Teal', primary: '#0d9488' },
   { id: 'blue', name: 'Sky Blue', primary: '#3b82f6' },
+  { id: 'violet', name: 'Translucent Violet', primary: '#a47cf3' },
   { id: 'indigo', name: 'Deep Indigo', primary: '#6366f1' },
   { id: 'purple', name: 'Soft Purple', primary: '#8b5cf6' },
   { id: 'rose', name: 'Rose Pink', primary: '#f43f5e' },
@@ -53,6 +55,6 @@ export const STORAGE_KEY = 'semaphore-theme';
 
 export const defaultSettings: ThemeSettings = {
   mode: 'dark',
-  accentColor: 'indigo',
+  accentColor: 'violet',
   intensity: 'balanced',
 };

@@ -3,6 +3,13 @@ import { DatabaseService } from '@/database/database.service';
 import { UserAppearanceSettings } from '@prisma/client';
 import { UpdateAppearanceSettingsDto } from './dto/update-appearance-settings.dto';
 
+/** What a new account starts with (the schema's own defaults are blue / minimal). */
+export const DEFAULT_APPEARANCE = {
+  themeMode: 'dark',
+  accentColor: 'violet',
+  intensity: 'balanced',
+} as const;
+
 @Injectable()
 export class AppearanceSettingsService {
   constructor(private readonly databaseService: DatabaseService) {}
@@ -13,7 +20,7 @@ export class AppearanceSettingsService {
   async getUserSettings(userId: string): Promise<UserAppearanceSettings> {
     return this.databaseService.userAppearanceSettings.upsert({
       where: { userId },
-      create: { userId },
+      create: { userId, ...DEFAULT_APPEARANCE },
       update: {},
     });
   }
@@ -27,7 +34,7 @@ export class AppearanceSettingsService {
   ): Promise<UserAppearanceSettings> {
     return this.databaseService.userAppearanceSettings.upsert({
       where: { userId },
-      create: { userId, ...dto },
+      create: { userId, ...DEFAULT_APPEARANCE, ...dto },
       update: dto,
     });
   }

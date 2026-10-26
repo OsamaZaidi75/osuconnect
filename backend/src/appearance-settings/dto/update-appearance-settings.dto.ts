@@ -11,6 +11,7 @@ export class UpdateAppearanceSettingsDto {
     'blue',
     'indigo',
     'purple',
+    'violet',
     'rose',
     'red',
     'orange',

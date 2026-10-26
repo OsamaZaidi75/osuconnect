@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react';
 import { chipClasses } from '@mui/material/Chip';
 import type { ThemeMode, AccentColor, ThemeIntensity } from './constants';
 import { FONT_FAMILY, HTML_FONT_SIZE, TYPE_SCALE, ICON_SCALE, RADIUS_UNIT } from './tokens';
+import { glassWallpaper } from './glassWallpaper';
 import type { TypeScale, IconScale } from './tokens';
 // Self-hosted UI font (see tokens.ts for why). Loaded here so it is present
 // wherever the theme is: app, Electron and the Ladle sandbox.
@@ -161,6 +162,13 @@ const accentPalettes = {
     lighter: '#c4b5fd',
     subtle: '#a78bfa',
   },
+  violet: {
+    primary: '#a47cf3',
+    light: '#bda0f7',
+    dark: '#8a5ce8',
+    lighter: '#d4c2fb',
+    subtle: '#bda0f7',
+  },
   rose: {
     primary: '#f43f5e',
     light: '#fb7185',
@@ -259,10 +267,26 @@ export function generateTheme(
   const isBalanced = intensityLevel >= 1;
   const isVibrant = intensityLevel >= 2;
 
-  // Frosted-glass surfaces over an accent mesh gradient (dark + balanced/vibrant).
+  // Translucent dark panels over a wallpaper (dark + balanced/vibrant).
   const isGlass = isDark && isBalanced;
-  const glassBlur = 'blur(18px) saturate(160%)';
-  const glassBorder = '1px solid rgba(255, 255, 255, 0.10)';
+  const glassBlur = 'blur(6px)';
+  const glassBorder = '1px solid rgba(255, 255, 255, 0.08)';
+  // Light catching the top edge and shading the bottom edge of a glass pane.
+  const glassEdge = 'inset 0 1px 1px rgba(255, 255, 255, 0.35), inset 0 -1px 2px rgba(0, 0, 0, 0.25), inset 0 0 0 1px rgba(255, 255, 255, 0.04)';
+  const glassPopout = {
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundImage: 'none',
+    backdropFilter: glassBlur,
+    WebkitBackdropFilter: glassBlur,
+    border: 'none',
+    borderRadius: 18,
+    boxShadow: `0 20px 40px rgba(0, 0, 0, 0.44), ${glassEdge}`,
+  };
+  const glassText = {
+    primary: '#ffffff',
+    secondary: 'rgba(255, 255, 255, 0.77)',
+    disabled: 'rgba(255, 255, 255, 0.5)',
+  };
 
   // Semantic colors that adapt to light/dark mode
   // Simplified to just status indicators and overlay levels
@@ -374,7 +398,7 @@ export function generateTheme(
         canvas: isBalanced && isDark ? 'transparent' : base.background.default,
         paper: paperBackground,
       },
-      text: base.text,
+      text: isGlass ? glassText : base.text,
       semantic: semanticColors,
     },
     components: {
@@ -395,11 +419,12 @@ export function generateTheme(
               boxShadow: `0 0 0 1px ${alpha(accent.primary, 0.05)} inset`,
             }),
             ...(isGlass && {
-              backgroundColor: 'rgba(26, 29, 36, 0.55)',
+              backgroundColor: 'rgba(0, 0, 0, 0.27)',
               backdropFilter: glassBlur,
               WebkitBackdropFilter: glassBlur,
               border: glassBorder,
-              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08)',
+              borderRadius: 12,
+              boxShadow: `0 8px 32px rgba(0, 0, 0, 0.3), ${glassEdge}`,
             }),
           },
         },
@@ -431,6 +456,19 @@ export function generateTheme(
                 borderColor: alpha(accent.primary, 0.4),
               }),
             },
+            ...(isGlass && {
+              backgroundColor: 'rgba(255, 255, 255, 0.14)',
+              backdropFilter: glassBlur,
+              WebkitBackdropFilter: glassBlur,
+              border: glassBorder,
+              borderRadius: 18,
+              boxShadow: glassEdge,
+              '&:hover': {
+                backgroundColor: 'rgba(255, 255, 255, 0.18)',
+                borderColor: 'rgba(255, 255, 255, 0.14)',
+                boxShadow: glassEdge,
+              },
+            }),
           },
         },
       },
@@ -438,6 +476,7 @@ export function generateTheme(
       // Buttons
       MuiButton: {
         styleOverrides: {
+          ...(isGlass && { root: { borderRadius: 16 } }),
           contained: {
             background: isVibrant
               ? `linear-gradient(135deg, ${accent.light} 0%, ${accent.primary} 50%, ${accent.dark} 100%)`
@@ -547,7 +586,7 @@ export function generateTheme(
                 : `linear-gradient(180deg, ${blendColors(accent.primary, base.background.paper, 0.2)} 0%, ${base.background.paper} 100%)`,
             }),
             ...(isGlass && {
-              background: 'rgba(20, 22, 30, 0.55)',
+              background: 'rgba(0, 0, 0, 0.34)',
               backdropFilter: glassBlur,
               WebkitBackdropFilter: glassBlur,
               borderRight: glassBorder,
@@ -582,7 +621,7 @@ export function generateTheme(
                 : `linear-gradient(90deg, #ffffff 0%, ${blendColors(accent.primary, '#ffffff', 0.2)} 100%)`,
             }),
             ...(isGlass && {
-              background: 'rgba(20, 22, 30, 0.45)',
+              background: 'rgba(0, 0, 0, 0.34)',
               backdropFilter: glassBlur,
               WebkitBackdropFilter: glassBlur,
               borderBottom: glassBorder,
@@ -630,9 +669,14 @@ export function generateTheme(
             '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
               borderColor: accent.primary,
             },
+            ...(isGlass && {
+              borderRadius: 20,
+              backgroundColor: 'rgba(255, 255, 255, 0.125)',
+              '&.Mui-focused': { backgroundColor: 'rgba(255, 255, 255, 0.165)' },
+            }),
           },
           notchedOutline: {
-            borderColor: alpha(accent.primary, 0.3),
+            borderColor: isGlass ? 'rgba(255, 255, 255, 0.12)' : alpha(accent.primary, 0.3),
           },
         },
       },
@@ -743,10 +787,17 @@ export function generateTheme(
       MuiTooltip: {
         styleOverrides: {
           tooltip: {
-            backgroundColor: isDark ? '#2a2d35' : '#333',
+            backgroundColor: isGlass ? 'rgba(0, 0, 0, 0.72)' : isDark ? '#2a2d35' : '#333',
           },
         },
       },
+
+      // Popouts: menus, popovers and dialogs are the most opaque glass panes.
+      // `&&` outranks the generic MuiPaper glass rule on the same element.
+      ...(isGlass && {
+        MuiPopover: { styleOverrides: { paper: { '&&': glassPopout } } },
+        MuiDialog: { styleOverrides: { paper: { '&&': glassPopout } } },
+      }),
 
       // CssBaseline for body background
       MuiCssBaseline: {
@@ -766,13 +817,7 @@ export function generateTheme(
               backgroundAttachment: 'fixed',
             }),
             ...(isGlass && {
-              background: [
-                `radial-gradient(900px circle at 10% 5%, ${alpha(accent.primary, 0.38)}, transparent 60%)`,
-                `radial-gradient(800px circle at 90% 10%, ${alpha('#8b5cf6', 0.30)}, transparent 55%)`,
-                `radial-gradient(900px circle at 75% 100%, ${alpha('#06b6d4', 0.22)}, transparent 60%)`,
-                `radial-gradient(700px circle at 5% 95%, ${alpha('#ec4899', 0.16)}, transparent 60%)`,
-                '#0b0d14',
-              ].join(', '),
+              background: `${glassWallpaper} center bottom / cover no-repeat, #0f0a26`,
               backgroundAttachment: 'fixed',
             }),
           },

@@ -1,6 +1,9 @@
 import { TestBed } from '@suites/unit';
 import type { Mocked } from '@suites/doubles.jest';
-import { AppearanceSettingsService } from './appearance-settings.service';
+import {
+  AppearanceSettingsService,
+  DEFAULT_APPEARANCE,
+} from './appearance-settings.service';
 import { DatabaseService } from '@/database/database.service';
 
 describe('AppearanceSettingsService', () => {
@@ -51,7 +54,7 @@ describe('AppearanceSettingsService', () => {
         databaseService.userAppearanceSettings.upsert,
       ).toHaveBeenCalledWith({
         where: { userId: 'user-1' },
-        create: { userId: 'user-1' },
+        create: { userId: 'user-1', ...DEFAULT_APPEARANCE },
         update: {},
       });
     });
@@ -67,7 +70,7 @@ describe('AppearanceSettingsService', () => {
         databaseService.userAppearanceSettings.upsert,
       ).toHaveBeenCalledWith({
         where: { userId: 'user-42' },
-        create: { userId: 'user-42' },
+        create: { userId: 'user-42', ...DEFAULT_APPEARANCE },
         update: {},
       });
     });
@@ -88,7 +91,7 @@ describe('AppearanceSettingsService', () => {
         databaseService.userAppearanceSettings.upsert,
       ).toHaveBeenCalledWith({
         where: { userId: 'user-1' },
-        create: { userId: 'user-1', themeMode: 'light' },
+        create: { userId: 'user-1', ...DEFAULT_APPEARANCE, themeMode: 'light' },
         update: { themeMode: 'light' },
       });
       expect(result.themeMode).toBe('light');
@@ -106,7 +109,7 @@ describe('AppearanceSettingsService', () => {
         databaseService.userAppearanceSettings.upsert,
       ).toHaveBeenCalledWith({
         where: { userId: 'user-1' },
-        create: { userId: 'user-1', ...dto },
+        create: { userId: 'user-1', ...DEFAULT_APPEARANCE, ...dto },
         update: dto,
       });
     });
