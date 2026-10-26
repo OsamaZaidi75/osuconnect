@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
-import { EventEmitter } from 'node:events';
 import type { Room } from 'livekit-client';
 import { useRemoteControlHost, hasRemoteControlApi, type RemoteControlHostApi } from '../../features/remoteControl/useRemoteControlHost';
 import { useRemoteControlViewer, REQUEST_TIMEOUT_MS } from '../../features/remoteControl/useRemoteControlViewer';
@@ -19,7 +18,30 @@ declare global {
   }
 }
 
-class FakeRoom extends EventEmitter {
+type Listener = (...args: unknown[]) => void;
+
+/** The two EventEmitter methods the hooks use, plus emit, without needing Node's typings. */
+class MiniEmitter {
+  private listeners = new Map<string, Set<Listener>>();
+
+  on(event: string, listener: Listener) {
+    const set = this.listeners.get(event) ?? new Set<Listener>();
+    set.add(listener);
+    this.listeners.set(event, set);
+    return this;
+  }
+
+  off(event: string, listener: Listener) {
+    this.listeners.get(event)?.delete(listener);
+    return this;
+  }
+
+  emit(event: string, ...args: unknown[]) {
+    for (const listener of [...(this.listeners.get(event) ?? [])]) listener(...args);
+  }
+}
+
+class FakeRoom extends MiniEmitter {
   remoteParticipants = new Map<string, { identity: string; name?: string }>();
   localParticipant = { identity: 'me', publishData: vi.fn().mockResolvedValue(undefined) };
 

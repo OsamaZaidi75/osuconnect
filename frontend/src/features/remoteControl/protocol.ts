@@ -31,7 +31,7 @@ export type RemoteControlMessage =
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-export function encodeMessage(message: RemoteControlMessage): Uint8Array {
+export function encodeMessage(message: RemoteControlMessage): Uint8Array<ArrayBuffer> {
   return encoder.encode(JSON.stringify({ v: PROTOCOL_VERSION, ...message }));
 }
 
