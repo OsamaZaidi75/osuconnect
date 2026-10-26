@@ -2,7 +2,7 @@
 	admin off
 }
 
-{$PUBLIC_DOMAIN}, app.osuconnect.xo.je {
+{$PUBLIC_DOMAIN}, chat.osuconnect.xo.je {
 	encode zstd gzip
 
 	header {
