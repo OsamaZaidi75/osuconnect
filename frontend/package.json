@@ -69,6 +69,7 @@
     "@emotion/styled": "^11.14.1",
     "@fontsource/roboto": "^5.3.0",
     "@hey-api/client-fetch": "^0.13.1",
+    "@jitsi/robotjs": "^0.6.24",
     "@livekit/components-react": "^2.9.24",
     "@mui/icons-material": "^7.3.11",
     "@mui/material": "^7.3.11",

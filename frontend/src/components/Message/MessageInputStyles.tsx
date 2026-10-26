@@ -13,7 +13,10 @@ export const StyledPaper = styled(Paper)(({ theme }) => ({
   display: "flex",
   alignItems: "flex-end",
   gap: theme.spacing(1),
-  background: theme.palette.background.paper,
+  // Glass theme: the translucent Paper surface shows through, as a pill-shaped composer
+  ...(theme.glass
+    ? { borderRadius: 28 }
+    : { background: theme.palette.background.paper }),
 }));
 
 export const StyledTextField = styled(TextField)(({ theme }) => ({

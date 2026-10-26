@@ -23,6 +23,8 @@ import type {
   BrowserLoginResult,
   DesktopSource,
   ElectronAPI,
+  RemoteControlAvailability,
+  RemoteControlRequestResult,
   SecureStorageStoreResult,
 } from '../../types/electron-api';
 
@@ -76,6 +78,13 @@ export function createFakeElectronAPI<O extends Partial<ElectronAPI> = Record<ne
     // Waits for the browser forever unless a test says otherwise
     startBrowserLogin: () => new Promise<BrowserLoginResult>(() => {}),
     cancelBrowserLogin: () => Promise.resolve(),
+    getRemoteControlAvailability: () =>
+      Promise.resolve<RemoteControlAvailability>({ supported: false, reason: 'no-screen' }),
+    requestRemoteControl: () => Promise.resolve<RemoteControlRequestResult>('denied'),
+    sendRemoteControlInput: noop,
+    endRemoteControl: noop,
+    notifyRemoteControlShareStopped: noop,
+    onRemoteControlStopped: subscribe,
   };
   return { ...defaults, ...overrides } as CompleteElectronAPI & O;
 }

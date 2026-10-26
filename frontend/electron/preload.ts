@@ -31,6 +31,13 @@ export interface DownloadProgress {
   total: number;
 }
 
+/** Why this machine can't be remote-controlled right now (mirrors main.ts). */
+export type RemoteControlAvailability =
+  | { supported: true }
+  | { supported: false; reason: 'wayland' | 'driver' | 'permission' | 'no-screen' };
+
+export type RemoteControlRequestResult = 'granted' | 'denied' | 'busy' | 'unavailable';
+
 /**
  * Desktop source information for screen capture
  */
@@ -265,6 +272,42 @@ const electronAPI = {
 
     return () => {
       ipcRenderer.removeListener('system:resume', subscription);
+    };
+  },
+
+  // Remote control of the shared screen (see electron/remote-control.ts).
+  // Whether this machine can be controlled right now, and why not if it can't.
+  getRemoteControlAvailability: (): Promise<RemoteControlAvailability> => {
+    return ipcRenderer.invoke('remote-control:availability');
+  },
+
+  // Ask the user (native dialog in main) to let `controllerName` control the
+  // shared screen; resolves once they answer.
+  requestRemoteControl: (controllerId: string, controllerName: string): Promise<RemoteControlRequestResult> => {
+    return ipcRenderer.invoke('remote-control:request', controllerId, controllerName);
+  },
+
+  // One input event from the approved controller (validated again in main).
+  sendRemoteControlInput: (event: unknown) => {
+    ipcRenderer.send('remote-control:input', event);
+  },
+
+  endRemoteControl: () => {
+    ipcRenderer.send('remote-control:end');
+  },
+
+  // The screen share stopped, so nobody can be controlling it any more.
+  notifyRemoteControlShareStopped: () => {
+    ipcRenderer.send('remote-control:share-stopped');
+  },
+
+  // Main ended control itself (stop shortcut, share changed, input failure).
+  onRemoteControlStopped: (callback: (reason: string) => void) => {
+    const subscription = (_event: IpcRendererEvent, reason: string) => callback(reason);
+    ipcRenderer.on('remote-control:stopped', subscription);
+
+    return () => {
+      ipcRenderer.removeListener('remote-control:stopped', subscription);
     };
   },
 };

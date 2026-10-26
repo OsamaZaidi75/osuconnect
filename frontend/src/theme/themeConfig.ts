@@ -14,6 +14,13 @@ import '@fontsource/roboto/700.css';
 
 // Extend MUI theme with custom semantic colors
 declare module '@mui/material/styles' {
+  /** True for the translucent glass look (dark + balanced/vibrant). */
+  interface Theme {
+    glass: boolean;
+  }
+  interface ThemeOptions {
+    glass?: boolean;
+  }
   /**
    * Named font-size scales (see theme/tokens.ts). Not Typography variants:
    * they exist so `sx={{ fontSize: 'scale.sm' }}` / `'icon.md'` resolve
@@ -337,6 +344,7 @@ export function generateTheme(
   const snackbarText = getContrastRatio(snackbarBackground, '#fff') >= 3 ? '#fff' : 'rgba(0, 0, 0, 0.87)';
 
   return createTheme({
+    glass: isGlass,
     shape: {
       borderRadius: RADIUS_UNIT,
     },

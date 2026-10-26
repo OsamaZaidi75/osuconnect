@@ -12,11 +12,13 @@ import { VoiceTestHooks } from "../../features/voice/VoiceTestHooks";
 // avoids relying on Rollup tree-shaking the unused re-exports. See PR-11.
 import { VoiceBottomBar } from "../Voice/VoiceBottomBar";
 import { AudioRenderer } from "../Voice/AudioRenderer";
+import { RemoteControlHost } from "../Voice/RemoteControlHost";
 import { PersistentVideoOverlay } from "../Voice/PersistentVideoOverlay";
 import { useVoiceConnection } from "../../hooks/useVoiceConnection";
 import type { User } from "../../types/auth.type";
 import { DesktopContentArea } from "./DesktopContentArea";
 import { ShortcutsProvider } from "../Shortcuts/ShortcutsProvider";
+import { GlassFrame } from "./GlassFrame";
 
 interface DesktopLayoutProps {
   userData: User | undefined;
@@ -35,28 +37,31 @@ export const DesktopLayout: React.FC<DesktopLayoutProps> = ({ userData }) => {
 
   return (
     <ShortcutsProvider>
-      <NotificationCenter
-        open={notificationCenterOpen}
-        onClose={() => setNotificationCenterOpen(false)}
-      />
-      <CommunityToggle
-        isExpanded={isMenuExpanded}
-        onToggleExpanded={() => setIsMenuExpanded((expanded) => !expanded)}
-        onOpenNotifications={() => setNotificationCenterOpen(true)}
-        voiceConnected={voiceState.isConnected}
-        user={userData}
-      />
-      <TrackSubscriptionProvider>
-        <VoiceEventLogProvider>
-          <VoiceTestHooks />
-          <DesktopContentArea voiceConnected={voiceState.isConnected} isMenuExpanded={isMenuExpanded} />
+      <GlassFrame>
+        <NotificationCenter
+          open={notificationCenterOpen}
+          onClose={() => setNotificationCenterOpen(false)}
+        />
+        <CommunityToggle
+          isExpanded={isMenuExpanded}
+          onToggleExpanded={() => setIsMenuExpanded((expanded) => !expanded)}
+          onOpenNotifications={() => setNotificationCenterOpen(true)}
+          voiceConnected={voiceState.isConnected}
+          user={userData}
+        />
+        <TrackSubscriptionProvider>
+          <VoiceEventLogProvider>
+            <VoiceTestHooks />
+            <DesktopContentArea voiceConnected={voiceState.isConnected} isMenuExpanded={isMenuExpanded} />
 
-          {/* Voice Components */}
-          <VoiceBottomBar />
-          <AudioRenderer />
-          <PersistentVideoOverlay />
-        </VoiceEventLogProvider>
-      </TrackSubscriptionProvider>
+            {/* Voice Components */}
+            <VoiceBottomBar />
+            <AudioRenderer />
+            <RemoteControlHost />
+            <PersistentVideoOverlay />
+          </VoiceEventLogProvider>
+        </TrackSubscriptionProvider>
+      </GlassFrame>
     </ShortcutsProvider>
   );
 };

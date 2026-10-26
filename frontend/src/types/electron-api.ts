@@ -74,6 +74,16 @@ export interface VoiceLogEntry {
   data?: Record<string, unknown>;
 }
 
+/**
+ * Whether this machine can be remote-controlled while sharing, and why not.
+ * Mirrors `electron/main.ts` / `preload.ts` (compiled separately).
+ */
+export type RemoteControlAvailability =
+  | { supported: true }
+  | { supported: false; reason: 'wayland' | 'driver' | 'permission' | 'no-screen' };
+
+export type RemoteControlRequestResult = 'granted' | 'denied' | 'busy' | 'unavailable';
+
 export interface ElectronAPI {
   platform?: string;
   isElectron?: boolean;
@@ -125,6 +135,23 @@ export interface ElectronAPI {
   }) => Promise<BrowserLoginResult>;
   /** Stop waiting for the browser (the pending start resolves `cancelled`). */
   cancelBrowserLogin?: () => Promise<void>;
+  /**
+   * Whether this machine can be remote-controlled while sharing its screen.
+   * Missing on desktop builds without remote control.
+   */
+  getRemoteControlAvailability?: () => Promise<RemoteControlAvailability>;
+  /**
+   * Ask the user, in a native dialog, to let someone control the shared
+   * screen. Resolves when they answer; 'granted' means control has begun.
+   */
+  requestRemoteControl?: (controllerId: string, controllerName: string) => Promise<RemoteControlRequestResult>;
+  /** One input event from the approved controller (validated again in main). */
+  sendRemoteControlInput?: (event: unknown) => void;
+  endRemoteControl?: () => void;
+  /** The screen share stopped; nobody can be controlling it any more. */
+  notifyRemoteControlShareStopped?: () => void;
+  /** Main ended control itself (stop shortcut, share changed, input failure). */
+  onRemoteControlStopped?: (callback: (reason: string) => void) => (() => void);
   [key: string]: unknown;
 }
 

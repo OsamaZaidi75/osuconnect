@@ -8,7 +8,7 @@
 import {
   app, BrowserWindow, ipcMain, session, desktopCapturer, Notification,
   Tray, Menu, nativeImage, screen, dialog, safeStorage, shell,
-  powerSaveBlocker, clipboard, powerMonitor,
+  powerSaveBlocker, clipboard, powerMonitor, globalShortcut, systemPreferences,
 } from 'electron';
 import { autoUpdater, UpdateInfo, ProgressInfo } from 'electron-updater';
 import { initMain } from 'electron-audio-loopback';
@@ -21,6 +21,7 @@ import { BrowserLoginSessions, type BrowserLoginAttempt, type BrowserLoginResult
 import { choosePasswordStore, probeSecretService } from './passwordStore';
 import log from 'electron-log/main';
 import { formatVoiceLogEntry } from './voiceLog';
+import { RemoteControlSession, type Bounds, type InputDriver } from './remote-control';
 
 // The app's log file (electron-log's default location: Linux
 // ~/.config/<app>/logs/main.log, macOS ~/Library/Logs/<app>/main.log,
@@ -851,6 +852,198 @@ function setupIpcHandlers() {
   );
 
   ipcMain.handle('browser-login:cancel', () => cancelBrowserLogin());
+
+  // Remote control of the shared screen (see remote-control.ts). Only the app
+  // window may use these; every input event is re-validated before it reaches
+  // the OS.
+  const fromAppWindow = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) =>
+    mainWindow !== null && event.sender === mainWindow.webContents;
+
+  ipcMain.handle('remote-control:availability', async (event): Promise<RemoteControlAvailability> => {
+    if (!fromAppWindow(event)) return { supported: false, reason: 'driver' };
+    return getRemoteControlAvailability();
+  });
+
+  ipcMain.handle('remote-control:request', async (event, controllerId: unknown, controllerName: unknown) => {
+    if (!fromAppWindow(event)) return 'unavailable' satisfies RemoteControlRequestResult;
+    if (typeof controllerId !== 'string' || controllerId.length === 0 || controllerId.length > 128) {
+      return 'unavailable' satisfies RemoteControlRequestResult;
+    }
+    return requestRemoteControl(controllerId, typeof controllerName === 'string' ? controllerName : '');
+  });
+
+  ipcMain.on('remote-control:input', (event, raw: unknown) => {
+    if (!fromAppWindow(event)) return;
+    try {
+      remoteControlSession.apply(raw);
+    } catch (error) {
+      console.error('Remote control input failed, ending control:', error);
+      endRemoteControl('error');
+    }
+  });
+
+  ipcMain.on('remote-control:end', (event) => {
+    if (fromAppWindow(event)) endRemoteControl('renderer');
+  });
+
+  // The renderer's screen share stopped
+  ipcMain.on('remote-control:share-stopped', (event) => {
+    if (!fromAppWindow(event)) return;
+    endRemoteControl('renderer');
+    sharedScreen = null;
+  });
+}
+
+// ─── Remote control of the shared screen ────────────────────────────────────
+
+/** Why the sharer can't be controlled right now. */
+type RemoteControlAvailability =
+  | { supported: true }
+  | { supported: false; reason: 'wayland' | 'driver' | 'permission' | 'no-screen' };
+
+type RemoteControlRequestResult = 'granted' | 'denied' | 'busy' | 'unavailable';
+
+const REMOTE_CONTROL_STOP_SHORTCUT = 'CommandOrControl+Alt+Shift+Q';
+const REMOTE_CONTROL_APPROVAL_TIMEOUT_MS = 30_000;
+
+/**
+ * The screen being shared, or null for a window share, no share, or Wayland.
+ * Control only ever targets this screen. `displayId` is '' when the OS didn't
+ * say which display it is (the primary one is used then).
+ */
+let sharedScreen: { displayId: string } | null = null;
+
+let inputDriver: InputDriver | null | undefined;
+let approvalInProgress = false;
+
+/** Load the native input library once; null when it isn't available on this build. */
+async function loadInputDriver(): Promise<InputDriver | null> {
+  if (inputDriver !== undefined) return inputDriver;
+  try {
+    const loaded = await import('@jitsi/robotjs');
+    const robot = ((loaded as { default?: unknown }).default ?? loaded) as unknown as InputDriver & {
+      setMouseDelay(ms: number): void;
+      setKeyboardDelay(ms: number): void;
+    };
+    // The library sleeps 10ms after every call by default, which would stall
+    // this process at mouse-move rates.
+    robot.setMouseDelay(0);
+    robot.setKeyboardDelay(0);
+    inputDriver = robot;
+  } catch (error) {
+    console.error('Remote control input driver unavailable:', error);
+    inputDriver = null;
+  }
+  return inputDriver;
+}
+
+/** The shared screen's bounds in the input driver's coordinate space. */
+function getSharedScreenBounds(): Bounds | null {
+  if (!sharedScreen) return null;
+  const display =
+    screen.getAllDisplays().find((d) => String(d.id) === sharedScreen?.displayId) ?? screen.getPrimaryDisplay();
+  const { x, y, width, height } = display.bounds;
+  // macOS input is in points, the same space as Electron's DIP bounds.
+  if (process.platform === 'darwin') return { x, y, width, height };
+  try {
+    const topLeft = screen.dipToScreenPoint({ x, y });
+    const bottomRight = screen.dipToScreenPoint({ x: x + width, y: y + height });
+    return { x: topLeft.x, y: topLeft.y, width: bottomRight.x - topLeft.x, height: bottomRight.y - topLeft.y };
+  } catch {
+    const scale = display.scaleFactor || 1;
+    return { x: x * scale, y: y * scale, width: width * scale, height: height * scale };
+  }
+}
+
+const remoteControlSession = new RemoteControlSession({
+  // Resolved lazily: begin() is only reached once the driver has loaded.
+  driver: {
+    moveMouse: (x, y) => inputDriver?.moveMouse(x, y),
+    dragMouse: (x, y) => inputDriver?.dragMouse(x, y),
+    mouseToggle: (direction, button) => inputDriver?.mouseToggle(direction, button),
+    scrollMouse: (x, y) => inputDriver?.scrollMouse(x, y),
+    keyToggle: (key, direction) => inputDriver?.keyToggle(key, direction),
+  },
+  getTargetBounds: getSharedScreenBounds,
+});
+
+async function getRemoteControlAvailability(): Promise<RemoteControlAvailability> {
+  if (isWayland()) return { supported: false, reason: 'wayland' };
+  if (!(await loadInputDriver())) return { supported: false, reason: 'driver' };
+  if (process.platform === 'darwin' && !systemPreferences.isTrustedAccessibilityClient(false)) {
+    return { supported: false, reason: 'permission' };
+  }
+  if (!sharedScreen) return { supported: false, reason: 'no-screen' };
+  return { supported: true };
+}
+
+/** Record which screen (if any) a new share captures; a changed share ends control. */
+function trackSharedSource(source: { id: string; display_id?: string } | null): void {
+  endRemoteControl('share-changed');
+  const isScreen = source !== null && source.id.startsWith('screen:') && !isWayland();
+  sharedScreen = isScreen ? { displayId: source.display_id ?? '' } : null;
+}
+
+/** Ask the sharer (in a native dialog the page can't draw or dismiss) and begin control. */
+async function requestRemoteControl(controllerId: string, rawName: string): Promise<RemoteControlRequestResult> {
+  const availability = await getRemoteControlAvailability();
+  if (!availability.supported) {
+    if (availability.reason === 'permission') systemPreferences.isTrustedAccessibilityClient(true);
+    return 'unavailable';
+  }
+  if (approvalInProgress || (remoteControlSession.isActive && remoteControlSession.controllerId !== controllerId)) {
+    return 'busy';
+  }
+
+  // eslint-disable-next-line no-control-regex -- strips control characters from a remote user's display name
+  const name = rawName.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 64) || 'Someone';
+
+  approvalInProgress = true;
+  const timeout = new AbortController();
+  const timer = setTimeout(() => timeout.abort(), REMOTE_CONTROL_APPROVAL_TIMEOUT_MS);
+  try {
+    mainWindow?.flashFrame(true);
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      title: 'Remote control request',
+      message: `${name} wants to control your screen`,
+      detail:
+        'If you allow it, they can move your mouse, click and type on this computer while you share your screen. ' +
+        `You can stop at any time by pressing ${REMOTE_CONTROL_STOP_SHORTCUT} or by stopping your screen share.`,
+      buttons: ['Deny', 'Allow'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+      signal: timeout.signal,
+    });
+    if (response !== 1) return 'denied';
+
+    // Sharing may have stopped while the dialog was open
+    if (!remoteControlSession.begin(controllerId)) return 'unavailable';
+
+    globalShortcut.register(REMOTE_CONTROL_STOP_SHORTCUT, () => endRemoteControl('shortcut'));
+    return 'granted';
+  } finally {
+    clearTimeout(timer);
+    approvalInProgress = false;
+    mainWindow?.flashFrame(false);
+  }
+}
+
+/** The page that held the share and the room is gone: nobody can be controlling. */
+function resetRemoteControl(): void {
+  endRemoteControl('quit');
+  sharedScreen = null;
+}
+
+/** Stop controlling, releasing anything held down. Tells the renderer unless it asked for it. */
+function endRemoteControl(reason: 'renderer' | 'shortcut' | 'share-changed' | 'quit' | 'error'): void {
+  if (!remoteControlSession.isActive) return;
+  remoteControlSession.end();
+  globalShortcut.unregister(REMOTE_CONTROL_STOP_SHORTCUT);
+  if (reason !== 'renderer' && reason !== 'quit') {
+    mainWindow?.webContents.send('remote-control:stopped', reason);
+  }
 }
 
 /** The browser sign-in, one at a time (see 'browser-login:start'). */
@@ -966,13 +1159,20 @@ function createWindow() {
   // Handle window destroyed
   mainWindow.on('closed', () => {
     cancelBrowserLogin();
+    resetRemoteControl();
     mainWindow = null;
   });
 
   // A reload (e.g. after changing server) or a crashed renderer abandons a
   // browser sign-in: nobody is left holding its PKCE verifier
-  mainWindow.webContents.on('did-start-loading', () => cancelBrowserLogin());
-  mainWindow.webContents.on('render-process-gone', () => cancelBrowserLogin());
+  mainWindow.webContents.on('did-start-loading', () => {
+    cancelBrowserLogin();
+    resetRemoteControl();
+  });
+  mainWindow.webContents.on('render-process-gone', () => {
+    cancelBrowserLogin();
+    resetRemoteControl();
+  });
 
   // Open target="_blank" links in the OS default browser instead of a new Electron window
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -1141,6 +1341,7 @@ app.whenReady().then(() => {
         const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] });
         if (sources.length > 0) {
           log('PipeWire portal returned source:', sources[0].name, sources[0].id);
+          trackSharedSource(null);
           grant({ video: sources[0], audio: 'loopback' });
         } else {
           log('PipeWire portal returned no sources (user cancelled or no PipeWire)');
@@ -1179,6 +1380,7 @@ app.whenReady().then(() => {
 
         if (selectedSource) {
           log('Selected source:', selectedSource.name, selectedSource.id);
+          trackSharedSource(selectedSource);
 
           // Use settings to determine audio configuration
           const enableAudio = settings?.enableAudio !== false; // Default to true if not specified
@@ -1226,6 +1428,7 @@ app.whenReady().then(() => {
 
         if (primaryScreen) {
           log('Auto-selected source:', primaryScreen.name, primaryScreen.id);
+          trackSharedSource(primaryScreen);
           log('Audio config: loopback');
           log('Source type:', primaryScreen.id.startsWith('screen:') ? 'screen' : 'window');
 
@@ -1284,6 +1487,7 @@ app.on('window-all-closed', () => {
 // Set isQuitting flag before the app starts closing windows
 app.on('before-quit', () => {
   isQuitting = true;
+  endRemoteControl('quit');
 });
 
 // On macOS, show existing window when dock icon is clicked

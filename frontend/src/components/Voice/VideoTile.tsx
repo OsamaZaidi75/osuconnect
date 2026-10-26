@@ -22,6 +22,7 @@ import type {
 } from 'livekit-client';
 import UserAvatar from '../Common/UserAvatar';
 import ScreenShareVolumeControl from './ScreenShareVolumeControl';
+import RemoteControlControls from './RemoteControlControls';
 import { useSpeaking } from '../../hooks/useSpeaking';
 import { useResponsive } from '../../hooks/useResponsive';
 import { useVideoStreamStats } from '../../hooks/useVideoStreamStats';
@@ -440,6 +441,11 @@ const VideoTile: React.FC<VideoTileProps> = ({
             {streamStats.height}p {streamStats.fps} fps
           </Typography>
         </Box>
+      )}
+
+      {/* Ask to control a desktop sharer's screen (renders nothing if they can't be controlled) */}
+      {hasScreen && !isLocal && !isPlaceholder && (
+        <RemoteControlControls participant={participant as RemoteParticipant} videoRef={screenRef} />
       )}
 
       {/* Recording indicator - top left (only for local screen share) */}

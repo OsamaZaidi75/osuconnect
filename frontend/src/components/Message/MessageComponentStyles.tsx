@@ -54,20 +54,24 @@ export const Container = styled("div", {
   padding: theme.spacing(0.5, 2),
   display: "flex",
   alignItems: "flex-start",
-  width: "100%",
-  marginBottom: 0,
+  // Glass theme: each message is its own rounded, tinted bubble inset from the edges
+  width: theme.glass ? "calc(100% - 16px)" : "100%",
+  margin: theme.glass ? "0 8px" : undefined,
+  marginBottom: theme.glass ? undefined : 0,
   position: "relative",
   backgroundColor: isFailed
     ? alpha(theme.palette.error.main, 0.06)
     : isHighlighted
     ? alpha(theme.palette.primary.main, 0.08)
+    : theme.glass
+    ? "rgba(0, 0, 0, 0.19)"
     : "transparent",
   border: stagedForDelete
     ? `2px solid ${theme.palette.error.main}`
     : isHighlighted
     ? `1px solid ${alpha(theme.palette.primary.main, 0.3)}`
     : "2px solid transparent",
-  borderRadius: stagedForDelete || isSearchHighlight ? theme.spacing(1) : 0,
+  borderRadius: stagedForDelete || isSearchHighlight ? theme.spacing(1) : theme.glass ? 18 : 0,
   transition: isDeleting ? "all 0.3s ease-out" : "all 0.2s ease-in-out",
   // Pending/failed opacity is independent of the delete-animation opacity —
   // isDeleting (0) always wins since a row can't be mid-delete-animation
@@ -92,6 +96,8 @@ export const Container = styled("div", {
       ? alpha(theme.palette.error.main, 0.1)
       : isHighlighted
       ? alpha(theme.palette.primary.main, 0.12)
+      : theme.glass
+      ? "rgba(0, 0, 0, 0.28)"
       : theme.palette.action.hover,
     "& .message-tools": {
       opacity: 1,

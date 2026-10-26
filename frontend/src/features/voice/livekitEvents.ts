@@ -100,6 +100,7 @@ export const ROOM_EVENT = {
     'connectionStateChanged' satisfies `${RoomEvent.ConnectionStateChanged}`,
   ConnectionQualityChanged:
     'connectionQualityChanged' satisfies `${RoomEvent.ConnectionQualityChanged}`,
+  DataReceived: 'dataReceived' satisfies `${RoomEvent.DataReceived}`,
 } as const;
 
 // ---- Track.Source ----
