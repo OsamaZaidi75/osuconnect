@@ -522,6 +522,8 @@ function setupApplicationMenu(): void {
   Menu.setApplicationMenu(menu);
 }
 
+let userRequestedUpdateCheck = false;
+
 /**
  * Configure auto-updater
  */
@@ -535,11 +537,13 @@ function setupAutoUpdater() {
   // Configure auto-updater logging
   autoUpdater.logger = console;
 
-  // Explicitly set feed URL to ensure correct GitHub owner (with hyphen)
+  // Explicitly set the feed to OUR releases. This used to point at the
+  // original project, whose newer version number made the app "update" itself
+  // into the upstream app (which doesn't know this app's theme settings).
   autoUpdater.setFeedURL({
     provider: 'github',
-    owner: 'semaphore-chat',
-    repo: 'semaphore-chat',
+    owner: 'OsamaZaidi75',
+    repo: 'osuconnect',
   });
 
   // Auto-updater events
@@ -563,7 +567,9 @@ function setupAutoUpdater() {
 
   autoUpdater.on('error', (err: Error) => {
     console.error('Error in auto-updater:', err);
-    if (mainWindow) {
+    // The hourly background check fails whenever no release is published
+    // yet; only tell the user about errors from a check they asked for
+    if (mainWindow && userRequestedUpdateCheck) {
       mainWindow.webContents.send('update-error', err);
     }
   });
@@ -610,6 +616,7 @@ function setupIpcHandlers() {
   // Check for updates manually
   ipcMain.on('check-for-updates', () => {
     if (process.env.NODE_ENV !== 'development') {
+      userRequestedUpdateCheck = true;
       autoUpdater.checkForUpdates().catch((err: Error) => {
         console.error('Failed to check for updates:', err);
       });

@@ -37,8 +37,8 @@ extraResources:
 # Auto-update configuration
 publish:
   provider: github
-  owner: semaphore-chat
-  repo: semaphore-chat
+  owner: OsamaZaidi75
+  repo: osuconnect
 
 # Windows configuration
 win:

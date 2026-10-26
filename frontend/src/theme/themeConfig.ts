@@ -265,7 +265,9 @@ export function generateTheme(
   accentColor: AccentColor,
   intensity: ThemeIntensity
 ): Theme {
-  const accent = accentPalettes[accentColor];
+  // An unknown accent (e.g. a setting saved by a different version) falls back
+  // instead of crashing the whole app at startup
+  const accent = accentPalettes[accentColor] ?? accentPalettes.violet;
   const base = mode === 'dark' ? darkBase : lightBase;
   const isDark = mode === 'dark';
 
