@@ -11,6 +11,10 @@
 
 export type MouseButton = 'left' | 'middle' | 'right';
 
+/** Loopback port the remote-control helper listens on (see helper-bridge.ts). */
+export const HELPER_PORT = 47821;
+export const HELPER_URL = `http://127.0.0.1:${HELPER_PORT}`;
+
 export type InputEvent =
   | { k: 'move'; x: number; y: number }
   | { k: 'down' | 'up'; b: MouseButton; x: number; y: number }

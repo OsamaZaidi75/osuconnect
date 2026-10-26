@@ -62,6 +62,7 @@ OsuConnect is a self-hosted, free, open-source communication platform that provi
 - **Uncapped Screen Share & Voice** — Screen share at the resolution and frame rate you pick, up to 4K at 60 fps (about 9 Mbps at 1080p60, 25 Mbps at 4K60), with lower layers for viewers on weaker connections; high-bitrate Opus voice (96 kbps by default, up to 128 kbps). No paid tier. See [Voice & Screen Share Quality](https://docs.semaphorechat.app/architecture/voice-video-quality/)
 - **Replay Capture** — Continuously buffers screen share sessions so you can retroactively clip the last 1-10 minutes. Trim to the exact clip, then share to a channel or save to your personal clip library
 - **Desktop App** — Electron client for Windows and Linux with a custom screen source picker, system tray integration, and auto-updates
+- **Remote Control** — Take control of someone's shared screen: they approve in a native dialog, and can stop any time with `Ctrl+Alt+Shift+Q`. The viewer can use any browser. The person sharing needs the desktop app, or the helper (below) if they share from a browser
 - **Communities** — Servers with text and voice channels, private channels, direct messages, and group DMs with file attachments
 - **Administration** — Role-based access control with granular permissions, community bans and timeouts, moderation logs, and per-user storage quotas
 - **Mobile-Friendly** — Responsive UI with swipe navigation, mobile-optimized panels, PWA support for install-to-homescreen, and push notifications
@@ -551,6 +552,22 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) and the [developer docs](https://docs.s
 - **Desktop app** — Electron builds for Windows and Linux are available from the [desktop app page](https://docs.semaphorechat.app/installation/desktop-app/).
 
 - **Docker images** — `ghcr.io/semaphore-chat/semaphore-chat-backend` and `ghcr.io/semaphore-chat/semaphore-chat-frontend`
+
+## Remote control helper (sharing from a browser)
+
+A website can't move your mouse, so letting others control a screen you share **from a browser** needs a small helper running on the same computer. It is the desktop app started without a window:
+
+```
+"Semaphore Chat.exe" --helper        # Windows (the installed app)
+semaphore-chat --helper              # Linux
+```
+
+A tray icon shows it is running. Then share your **entire screen** from the browser as usual. When someone asks for control you get a native Allow / Deny dialog, and you can stop any time with `Ctrl+Alt+Shift+Q` or the tray menu.
+
+- The helper listens only on `127.0.0.1:47821` and answers only the OsuConnect web pages it trusts. To trust another address, set `OSUCONNECT_HELPER_ORIGINS` (comma-separated, e.g. `https://chat.example.com`) before starting it.
+- It needs a browser that lets an HTTPS page talk to `127.0.0.1` (Chrome, Edge and Firefox do, Chrome may ask for local-network permission once; Safari doesn't).
+- Only entire-screen shares can be controlled, not windows or tabs. With several monitors it picks the one matching the shared video's shape, then the one under your pointer.
+- Not supported on Linux Wayland. On macOS, allow Accessibility when asked.
 
 ## Documentation
 

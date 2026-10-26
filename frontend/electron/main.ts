@@ -21,7 +21,15 @@ import { BrowserLoginSessions, type BrowserLoginAttempt, type BrowserLoginResult
 import { choosePasswordStore, probeSecretService } from './passwordStore';
 import log from 'electron-log/main';
 import { formatVoiceLogEntry } from './voiceLog';
-import { RemoteControlSession, type Bounds, type InputDriver } from './remote-control';
+import { RemoteControlSession, HELPER_PORT, type Bounds, type InputDriver } from './remote-control';
+import {
+  createBridge,
+  chooseDisplay,
+  parseOrigins,
+  DEFAULT_ALLOWED_ORIGINS,
+  type HelperBridge,
+  type ShareInfo,
+} from './helper-bridge';
 
 // The app's log file (electron-log's default location: Linux
 // ~/.config/<app>/logs/main.log, macOS ~/Library/Logs/<app>/main.log,
@@ -217,6 +225,15 @@ function displayMediaResponder(callback: (streams: Electron.Streams) => void) {
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
+
+// ─── Helper mode (remote control for people sharing from a browser) ────────
+// With --helper the app runs without a window: a tray icon plus a loopback
+// bridge the OsuConnect web page talks to (see helper-bridge.ts). It uses its
+// own user-data folder so it can run next to the normal app.
+const isHelperMode = process.argv.includes('--helper');
+if (isHelperMode) {
+  app.setPath('userData', path.join(app.getPath('appData'), 'OsuConnect Helper'));
+}
 
 // ─── Smoke Test Mode (CI PR builds, electron-smoke.yml) ────────────────────
 // With --smoke-test, quit as soon as the main window fires ready-to-show
@@ -1043,7 +1060,86 @@ function endRemoteControl(reason: 'renderer' | 'shortcut' | 'share-changed' | 'q
   globalShortcut.unregister(REMOTE_CONTROL_STOP_SHORTCUT);
   if (reason !== 'renderer' && reason !== 'quit') {
     mainWindow?.webContents.send('remote-control:stopped', reason);
+    helperBridge?.broadcastStopped(reason);
   }
+}
+
+// ─── Helper mode: tray + loopback bridge ────────────────────────────────────
+
+let helperBridge: HelperBridge | null = null;
+
+/** The shared screen, from what the browser reports about its capture track. */
+function setHelperShare(info: ShareInfo | null): void {
+  endRemoteControl('share-changed');
+  if (!info || info.surface !== 'monitor' || isWayland()) {
+    sharedScreen = null;
+    return;
+  }
+  const displays = screen.getAllDisplays().map((display) => ({
+    id: display.id,
+    bounds: display.bounds,
+    primary: display.id === screen.getPrimaryDisplay().id,
+  }));
+  const chosen = chooseDisplay(displays, { width: info.width, height: info.height }, screen.getCursorScreenPoint());
+  sharedScreen = chosen ? { displayId: String(chosen.id) } : null;
+}
+
+function setupHelperMode(): void {
+  if (process.platform === 'darwin') app.dock?.hide();
+
+  const origins = [...DEFAULT_ALLOWED_ORIGINS, ...parseOrigins(process.env.OSUCONNECT_HELPER_ORIGINS)];
+  helperBridge = createBridge({
+    port: HELPER_PORT,
+    allowedOrigins: origins,
+    backend: {
+      setShare: setHelperShare,
+      availability: getRemoteControlAvailability,
+      request: requestRemoteControl,
+      input: (events) => {
+        try {
+          for (const event of events) remoteControlSession.apply(event);
+        } catch (error) {
+          console.error('Remote control input failed, ending control:', error);
+          endRemoteControl('error');
+        }
+      },
+      end: () => endRemoteControl('renderer'),
+    },
+  });
+
+  helperBridge.listen().then(
+    () => console.log(`Remote-control helper listening on 127.0.0.1:${HELPER_PORT}`),
+    (error: unknown) => {
+      dialog.showErrorBox(
+        'OsuConnect remote-control helper',
+        `Could not start (port ${HELPER_PORT} is probably in use: is the helper already running?)\n\n${String(error)}`,
+      );
+      app.quit();
+    },
+  );
+
+  let icon: Electron.NativeImage;
+  try {
+    icon = nativeImage.createFromPath(getIconPath()).resize({ width: process.platform === 'linux' ? 22 : 16 });
+  } catch {
+    icon = nativeImage.createEmpty();
+  }
+  tray = new Tray(icon);
+  tray.setToolTip('OsuConnect remote-control helper');
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: 'OsuConnect remote-control helper', enabled: false },
+      { label: 'Stop controlling now', click: () => endRemoteControl('shortcut') },
+      { type: 'separator' },
+      {
+        label: 'Quit helper',
+        click: () => {
+          isQuitting = true;
+          app.quit();
+        },
+      },
+    ]),
+  );
 }
 
 /** The browser sign-in, one at a time (see 'browser-login:start'). */
@@ -1454,6 +1550,11 @@ app.whenReady().then(() => {
     }
   });
 
+  if (isHelperMode) {
+    setupHelperMode();
+    return;
+  }
+
   createWindow();
   setupPowerMonitor();
   setupTray();
@@ -1488,10 +1589,12 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   isQuitting = true;
   endRemoteControl('quit');
+  void helperBridge?.close();
 });
 
 // On macOS, show existing window when dock icon is clicked
 app.on('activate', () => {
+  if (isHelperMode) return;
   if (mainWindow) {
     mainWindow.show();
     mainWindow.focus();
